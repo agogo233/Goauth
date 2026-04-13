@@ -60,17 +60,16 @@ func PasswordScore(password string) int {
 }
 
 // GenerateRandomPassword 生成随机密码
-func GenerateRandomPassword(length int) string {
+func GenerateRandomPassword(length int) (string, error) {
 	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*"
 	b := make([]byte, length)
 	if _, err := rand.Read(b); err != nil {
-		// 如果加密随机数生成失败，不应该继续
-		panic("crypto/rand failed: " + err.Error())
+		return "", err
 	}
 	for i := range b {
 		b[i] = charset[int(b[i])%len(charset)]
 	}
-	return string(b)
+	return string(b), nil
 }
 
 // IsValidEmail 验证邮箱格式是否有效

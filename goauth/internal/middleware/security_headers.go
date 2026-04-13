@@ -25,8 +25,9 @@ func SecurityHeaders() gin.HandlerFunc {
 
 		// Content-Security-Policy
 		// 注意：由于使用 Alpine.js 内联脚本和内联样式，需要 'unsafe-inline'
+		// Alpine.js 压缩版需要 'unsafe-eval' 来执行模板表达式 (x-bind, x-on 等)
 		// 生产环境可考虑使用 nonce 或 hash 替代
-		c.Header("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'self'")
+		c.Header("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'self'")
 
 		c.Next()
 	}

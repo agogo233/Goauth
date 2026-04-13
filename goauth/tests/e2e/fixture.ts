@@ -33,6 +33,62 @@ export { expect };
 // 这样可以确保所有测试文件使用同一个状态文件
 const STATE_FILE = '/tmp/goauth-e2e-admin-state.json';
 
+// 测试资源清理注册表
+interface TestResource {
+  type: 'group' | 'client' | 'user' | 'invitation' | 'proxyauth';
+  id: string;
+}
+
+const CLEANUP_FILE = '/tmp/goauth-e2e-cleanup.json';
+
+// 注册需要清理的资源
+export function registerCleanup(resource: TestResource): void {
+  let resources: TestResource[] = [];
+  if (existsSync(CLEANUP_FILE)) {
+    try {
+      resources = JSON.parse(readFileSync(CLEANUP_FILE, 'utf-8'));
+    } catch {}
+  }
+  resources.push(resource);
+  writeFileSync(CLEANUP_FILE, JSON.stringify(resources));
+}
+
+// 执行清理
+export async function executeCleanup(request: any, authCookies: { session?: string; csrf?: string }): Promise<void> {
+  if (!existsSync(CLEANUP_FILE)) return;
+  
+  let resources: TestResource[] = [];
+  try {
+    resources = JSON.parse(readFileSync(CLEANUP_FILE, 'utf-8'));
+  } catch {
+    return;
+  }
+
+  const headers: Record<string, string> = { 'Cookie': `session=${authCookies.session}` };
+  if (authCookies.csrf) {
+    headers['Cookie'] += `; csrf_token=${encodeURIComponent(authCookies.csrf)}`;
+    headers['X-CSRF-Token'] = authCookies.csrf;
+  }
+
+  // 按类型分批清理
+  const endpoints: Record<string, string> = {
+    group: '/api/admin/groups',
+    client: '/api/admin/clients',
+    user: '/api/admin/users',
+    invitation: '/api/admin/invitations',
+    proxyauth: '/api/admin/proxy-auth',
+  };
+
+  for (const resource of resources) {
+    try {
+      await request.delete(`${endpoints[resource.type]}/${resource.id}`, { headers });
+    } catch {}
+  }
+
+  // 清空清理文件
+  unlinkSync(CLEANUP_FILE);
+}
+
 // 生成随机用户名
 function generateUsername(): string {
   return `testuser_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
@@ -906,6 +962,37 @@ export async function hasErrorMessage(page: Page): Promise<boolean> {
 export async function getErrorMessage(page: Page): Promise<string> {
   const errorElement = page.locator('.error');
   return await errorElement.textContent() || '';
+}
+
+/**
+ * 构建认证请求头
+ */
+export function buildAuthHeaders(authCookies: { session?: string; csrf?: string }, contentType = 'application/json'): Record<string, string> {
+  const headers: Record<string, string> = {};
+  if (contentType) headers['Content-Type'] = contentType;
+  
+  const cookieParts: string[] = [];
+  if (authCookies.session) cookieParts.push(`session=${authCookies.session}`);
+  if (authCookies.csrf) cookieParts.push(`csrf_token=${encodeURIComponent(authCookies.csrf)}`);
+  if (cookieParts.length > 0) headers['Cookie'] = cookieParts.join('; ');
+  
+  if (authCookies.csrf) headers['X-CSRF-Token'] = authCookies.csrf;
+  return headers;
+}
+
+/**
+ * 从页面上下文提取认证 cookies
+ */
+export async function extractAuthCookies(page: Page): Promise<{ session?: string; csrf?: string }> {
+  const context = page.context();
+  const cookies = await context.cookies();
+  const sessionCookie = cookies.find(c => c.name === 'session');
+  const csrfCookie = cookies.find(c => c.name === 'csrf_token');
+  
+  return {
+    session: sessionCookie?.value,
+    csrf: csrfCookie ? decodeURIComponent(csrfCookie.value) : undefined,
+  };
 }
 
 // 导出常量

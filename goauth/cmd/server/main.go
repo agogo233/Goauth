@@ -289,7 +289,10 @@ func runResetPassword(cmd *cobra.Command, args []string) {
 	}
 
 	// Generate random password
-	newPassword := util.GenerateRandomPassword(16)
+	newPassword, err := util.GenerateRandomPassword(16)
+	if err != nil {
+		log.Fatal().Err(err).Msg("Failed to generate random password")
+	}
 
 	// Hash password
 	hashedPassword, err := util.HashPassword(newPassword)

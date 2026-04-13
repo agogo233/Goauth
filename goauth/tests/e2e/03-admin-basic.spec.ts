@@ -1,8 +1,60 @@
-import { test, expect, waitForPageReady, STRONG_PASSWORD } from './fixture';
+import { test, expect, waitForPageReady, STRONG_PASSWORD, registerCleanup, extractAuthCookies, buildAuthHeaders, getSavedAdmin } from './fixture';
+import { writeFileSync, readFileSync, existsSync, unlinkSync } from 'fs';
 
 /**
  * 管理后台 E2E 测试
+ * 
+ * 注意：此文件创建的资源会在清理阶段自动删除
  */
+
+// 清理数据文件
+const CLEANUP_DATA_FILE = '/tmp/goauth-e2e-admin-basic-cleanup.json';
+
+interface CleanupData {
+  groupIds: string[];
+  clientIds: string[];
+  invitationIds: string[];
+  proxyAuthIds: string[];
+}
+
+function getCleanupData(): CleanupData {
+  if (!existsSync(CLEANUP_DATA_FILE)) {
+    return { groupIds: [], clientIds: [], invitationIds: [], proxyAuthIds: [] };
+  }
+  try {
+    return JSON.parse(readFileSync(CLEANUP_DATA_FILE, 'utf-8'));
+  } catch {
+    return { groupIds: [], clientIds: [], invitationIds: [], proxyAuthIds: [] };
+  }
+}
+
+function saveCleanupData(data: CleanupData): void {
+  writeFileSync(CLEANUP_DATA_FILE, JSON.stringify(data));
+}
+
+function addGroupId(id: string): void {
+  const data = getCleanupData();
+  data.groupIds.push(id);
+  saveCleanupData(data);
+}
+
+function addClientId(id: string): void {
+  const data = getCleanupData();
+  data.clientIds.push(id);
+  saveCleanupData(data);
+}
+
+function addInvitationId(id: string): void {
+  const data = getCleanupData();
+  data.invitationIds.push(id);
+  saveCleanupData(data);
+}
+
+function addProxyAuthId(id: string): void {
+  const data = getCleanupData();
+  data.proxyAuthIds.push(id);
+  saveCleanupData(data);
+}
 
 test.describe.configure({ mode: 'serial' });
 
@@ -38,7 +90,7 @@ test.describe('管理后台', () => {
 test.describe('分组管理', () => {
   test.use({ storageState: undefined });
 
-  test('可以创建分组', async ({ authenticatedPage: page }) => {
+  test('可以创建分组', async ({ authenticatedPage: page, request }) => {
     await page.goto('/#admin');
     await waitForPageReady(page);
 
@@ -61,6 +113,19 @@ test.describe('分组管理', () => {
 
     // 验证分组创建成功 - 使用 .first() 因为可能有多个匹配
     await expect(page.locator(`text=${groupName}`).first()).toBeVisible({ timeout: 5000 });
+    
+    // 获取创建的分组 ID 用于清理
+    const authCookies = await extractAuthCookies(page);
+    const groupsResponse = await request.get('/api/admin/groups', {
+      headers: buildAuthHeaders(authCookies),
+    });
+    if (groupsResponse.status() === 200) {
+      const groups = await groupsResponse.json();
+      const createdGroup = groups.find((g: any) => g.name === groupName);
+      if (createdGroup) {
+        addGroupId(createdGroup.id);
+      }
+    }
   });
 
   test('分组列表显示成员数量', async ({ authenticatedPage: page }) => {
@@ -161,6 +226,9 @@ test.describe('客户端管理', () => {
 
     // 验证客户端创建成功
     await expect(page.locator(`text=${clientId}`).first()).toBeVisible({ timeout: 5000 });
+    
+    // 记录创建的客户端 ID 用于清理
+    addClientId(clientId);
   });
 
   test('可以创建可信客户端', async ({ authenticatedPage: page }) => {
@@ -191,6 +259,9 @@ test.describe('客户端管理', () => {
 
     // 验证创建成功
     await expect(page.locator(`text=${clientId}`).first()).toBeVisible({ timeout: 5000 });
+    
+    // 记录创建的客户端 ID 用于清理
+    addClientId(clientId);
   });
 });
 
@@ -255,5 +326,55 @@ test.describe('代理认证管理', () => {
 
     // 验证代理认证配置已添加 - 检查域名是否出现在表格中
     await expect(page.locator(`text=${domain}`)).toBeVisible({ timeout: 5000 });
+  });
+});
+
+// ============ 清理测试数据 ============
+
+test.describe('清理', () => {
+  test.use({ storageState: undefined });
+
+  test('清理所有测试创建的资源', async ({ authenticatedPage: page, request }) => {
+    await expect(page.locator('h1:has-text("管理后台")')).toBeVisible({ timeout: 5000 });
+    
+    const authCookies = await extractAuthCookies(page);
+    const cleanupData = getCleanupData();
+    
+    // 清理分组
+    for (const groupId of cleanupData.groupIds) {
+      await request.delete(`/api/admin/groups/${groupId}`, {
+        headers: buildAuthHeaders(authCookies),
+      }).catch(() => {});
+    }
+    
+    // 清理客户端
+    for (const clientId of cleanupData.clientIds) {
+      await request.delete(`/api/admin/clients/${clientId}`, {
+        headers: buildAuthHeaders(authCookies),
+      }).catch(() => {});
+    }
+    
+    // 清理邀请
+    for (const invitationId of cleanupData.invitationIds) {
+      await request.delete(`/api/admin/invitations/${invitationId}`, {
+        headers: buildAuthHeaders(authCookies),
+      }).catch(() => {});
+    }
+    
+    // 清理代理认证
+    for (const proxyAuthId of cleanupData.proxyAuthIds) {
+      await request.delete(`/api/admin/proxy-auth/${proxyAuthId}`, {
+        headers: buildAuthHeaders(authCookies),
+      }).catch(() => {});
+    }
+    
+    // 清理数据文件
+    try {
+      if (existsSync(CLEANUP_DATA_FILE)) {
+        unlinkSync(CLEANUP_DATA_FILE);
+      }
+    } catch {}
+    
+    expect(true).toBeTruthy();
   });
 });

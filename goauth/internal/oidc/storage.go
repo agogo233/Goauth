@@ -311,9 +311,13 @@ func (s *Storage) ValidateJWTProfileScopes(ctx context.Context, userID string, s
 
 // CreateAuthRequest 创建授权请求
 func (s *Storage) CreateAuthRequest(ctx context.Context, authReq *oidc.AuthRequest, userID string) (op.AuthRequest, error) {
+	id, err := generateID()
+	if err != nil {
+		return nil, err
+	}
 	req := &AuthRequest{
 		AuthRequest: *authReq,
-		ID:          generateID(),
+		ID:          id,
 		UserID:      userID,
 		AuthTime:    time.Now(),
 	}
@@ -420,7 +424,10 @@ func (s *Storage) CompleteAuthRequest(ctx context.Context, authRequestID, userID
 
 // CreateAccessToken 创建访问令牌
 func (s *Storage) CreateAccessToken(ctx context.Context, req op.TokenRequest) (string, time.Time, error) {
-	tokenID := generateID()
+	tokenID, err := generateID()
+	if err != nil {
+		return "", time.Time{}, err
+	}
 	exp := time.Now().Add(s.cfg.OIDC.AccessTokenTTL)
 
 	token := &AccessToken{
@@ -456,7 +463,10 @@ func (s *Storage) CreateAccessAndRefreshTokens(ctx context.Context, req op.Token
 		return "", "", time.Time{}, err
 	}
 
-	refreshToken := generateID()
+	refreshToken, err := generateID()
+	if err != nil {
+		return "", "", time.Time{}, err
+	}
 	refreshExp := time.Now().Add(s.cfg.OIDC.RefreshTokenTTL)
 
 	token := &AccessToken{
@@ -701,10 +711,12 @@ func (c *Client) ClockSkew() time.Duration              { return c.ClockSkew_ }
 func (c *Client) IDTokenSigningKeyID() string           { return "key-1" }
 
 // 辅助函数
-func generateID() string {
+func generateID() (string, error) {
 	b := make([]byte, 16)
-	rand.Read(b)
-	return base64.RawURLEncoding.EncodeToString(b)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(b), nil
 }
 
 func ptrTime(t time.Time) *time.Time {

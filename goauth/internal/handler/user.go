@@ -33,16 +33,25 @@ func NewUserHandler(userService *service.UserService, totpService *service.TotpS
 
 // GetMe 获取当前用户
 func (h *UserHandler) GetMe(c *gin.Context) {
-	userID, _ := c.Get("userID")
+	userIDVal, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "未登录"})
+		return
+	}
+	userID, ok := userIDVal.(string)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "内部错误"})
+		return
+	}
 
-	user, err := h.userService.GetByID(c.Request.Context(), userID.(string))
+	user, err := h.userService.GetByID(c.Request.Context(), userID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "获取用户信息失败"})
 		return
 	}
 
 	// 检查 TOTP 状态
-	hasTotp, _ := h.totpService.IsEnabled(c.Request.Context(), userID.(string))
+	hasTotp, _ := h.totpService.IsEnabled(c.Request.Context(), userID)
 	user.HasTotp = hasTotp
 
 	c.JSON(http.StatusOK, user)
@@ -50,7 +59,16 @@ func (h *UserHandler) GetMe(c *gin.Context) {
 
 // UpdateProfile 更新资料
 func (h *UserHandler) UpdateProfile(c *gin.Context) {
-	userID, _ := c.Get("userID")
+	userIDVal, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "未登录"})
+		return
+	}
+	userID, ok := userIDVal.(string)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "内部错误"})
+		return
+	}
 
 	var req struct {
 		Name  *string `json:"name"`
@@ -61,7 +79,7 @@ func (h *UserHandler) UpdateProfile(c *gin.Context) {
 		return
 	}
 
-	user, err := h.userService.UpdateProfile(c.Request.Context(), userID.(string), req.Name, req.Email)
+	user, err := h.userService.UpdateProfile(c.Request.Context(), userID, req.Name, req.Email)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "更新失败"})
 		return
@@ -72,7 +90,16 @@ func (h *UserHandler) UpdateProfile(c *gin.Context) {
 
 // UpdatePassword 更新密码
 func (h *UserHandler) UpdatePassword(c *gin.Context) {
-	userID, _ := c.Get("userID")
+	userIDVal, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "未登录"})
+		return
+	}
+	userID, ok := userIDVal.(string)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "内部错误"})
+		return
+	}
 
 	var req struct {
 		OldPassword string `json:"oldPassword" binding:"required"`
@@ -83,7 +110,7 @@ func (h *UserHandler) UpdatePassword(c *gin.Context) {
 		return
 	}
 
-	err := h.userService.UpdatePassword(c.Request.Context(), userID.(string), req.OldPassword, req.NewPassword)
+	err := h.userService.UpdatePassword(c.Request.Context(), userID, req.OldPassword, req.NewPassword)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -94,10 +121,28 @@ func (h *UserHandler) UpdatePassword(c *gin.Context) {
 
 // SetupTotp 设置 TOTP
 func (h *UserHandler) SetupTotp(c *gin.Context) {
-	userID, _ := c.Get("userID")
-	username, _ := c.Get("username")
+	userIDVal, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "未登录"})
+		return
+	}
+	userID, ok := userIDVal.(string)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "内部错误"})
+		return
+	}
+	usernameVal, exists := c.Get("username")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "未登录"})
+		return
+	}
+	username, ok := usernameVal.(string)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "内部错误"})
+		return
+	}
 
-	resp, err := h.totpService.Setup(c.Request.Context(), userID.(string), username.(string))
+	resp, err := h.totpService.Setup(c.Request.Context(), userID, username)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -108,7 +153,16 @@ func (h *UserHandler) SetupTotp(c *gin.Context) {
 
 // VerifyTotp 验证并确认 TOTP 设置
 func (h *UserHandler) VerifyTotp(c *gin.Context) {
-	userID, _ := c.Get("userID")
+	userIDVal, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "未登录"})
+		return
+	}
+	userID, ok := userIDVal.(string)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "内部错误"})
+		return
+	}
 
 	var req struct {
 		Code            string `json:"code" binding:"required"`
@@ -128,7 +182,7 @@ func (h *UserHandler) VerifyTotp(c *gin.Context) {
 	}
 
 	// 验证成功，存储密钥
-	err := h.totpService.ConfirmSetup(c.Request.Context(), userID.(string), req.EncryptedSecret)
+	err := h.totpService.ConfirmSetup(c.Request.Context(), userID, req.EncryptedSecret)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -168,9 +222,18 @@ func (h *UserHandler) VerifyTotp(c *gin.Context) {
 
 // RemoveTotp 移除 TOTP
 func (h *UserHandler) RemoveTotp(c *gin.Context) {
-	userID, _ := c.Get("userID")
+	userIDVal, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "未登录"})
+		return
+	}
+	userID, ok := userIDVal.(string)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "内部错误"})
+		return
+	}
 
-	err := h.totpService.Remove(c.Request.Context(), userID.(string))
+	err := h.totpService.Remove(c.Request.Context(), userID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -181,10 +244,19 @@ func (h *UserHandler) RemoveTotp(c *gin.Context) {
 
 // GetSessions 获取所有 Session
 func (h *UserHandler) GetSessions(c *gin.Context) {
-	userID, _ := c.Get("userID")
+	userIDVal, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "未登录"})
+		return
+	}
+	userID, ok := userIDVal.(string)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "内部错误"})
+		return
+	}
 	currentSessionID, _ := c.Get("sessionID")
 
-	sessions, err := h.userService.GetUserSessions(c.Request.Context(), userID.(string))
+	sessions, err := h.userService.GetUserSessions(c.Request.Context(), userID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "获取会话失败"})
 		return
@@ -221,7 +293,16 @@ func (h *UserHandler) GetSessions(c *gin.Context) {
 
 // TerminateSession 终止指定 Session
 func (h *UserHandler) TerminateSession(c *gin.Context) {
-	userID, _ := c.Get("userID")
+	userIDVal, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "未登录"})
+		return
+	}
+	userID, ok := userIDVal.(string)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "内部错误"})
+		return
+	}
 	sessionID := c.Param("id")
 
 	// 验证会话属于当前用户
@@ -231,7 +312,7 @@ func (h *UserHandler) TerminateSession(c *gin.Context) {
 		return
 	}
 
-	if session.UserID != userID.(string) {
+	if session.UserID != userID {
 		c.JSON(http.StatusForbidden, gin.H{"error": "无权终止此会话"})
 		return
 	}

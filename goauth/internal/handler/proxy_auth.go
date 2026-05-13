@@ -75,7 +75,7 @@ func (h *ProxyAuthHandler) ForwardAuth(c *gin.Context) {
 	}
 
 	// 验证 session
-	user, err := h.authService.ValidateSession(c.Request.Context(), token)
+	user, session, err := h.authService.ValidateSessionWithAMR(c.Request.Context(), token)
 	if err != nil || user == nil {
 		c.Status(http.StatusUnauthorized)
 		return
@@ -113,9 +113,11 @@ func (h *ProxyAuthHandler) ForwardAuth(c *gin.Context) {
 	}
 
 	// 检查 MFA 要求
-	if proxyAuth.MFARequired && !user.MFARequired {
-		// 该域名需要 MFA，但用户未启用
-		// 可以选择允许或拒绝，这里选择允许（因为用户可能已经通过 MFA 登录）
+	if proxyAuth.MFARequired {
+		if session == nil || !strings.Contains(session.AMR, "totp") {
+			c.Status(http.StatusForbidden)
+			return
+		}
 	}
 
 	// 检查分组限制

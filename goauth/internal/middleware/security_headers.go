@@ -14,20 +14,24 @@ func SecurityHeaders() gin.HandlerFunc {
 		// 防止点击劫持
 		c.Header("X-Frame-Options", "DENY")
 
-		// 启用浏览器 XSS 过滤器
-		c.Header("X-XSS-Protection", "1; mode=block")
-
 		// 引用策略
 		c.Header("Referrer-Policy", "strict-origin-when-cross-origin")
 
 		// 权限策略（替代 Feature-Policy）
 		c.Header("Permissions-Policy", "geolocation=(), microphone=(), camera=()")
 
+		// HSTS - 强制 HTTPS，一年有效期
+		c.Header("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+
+		// 隔离模式：阻止其他源加载你的资源，也阻止你的资源被其他源加载
+		c.Header("Cross-Origin-Embedder-Policy", "require-corp")
+		c.Header("Cross-Origin-Opener-Policy", "same-origin")
+
 		// Content-Security-Policy
 		// 注意：由于使用 Alpine.js 内联脚本和内联样式，需要 'unsafe-inline'
 		// Alpine.js 压缩版需要 'unsafe-eval' 来执行模板表达式 (x-bind, x-on 等)
 		// 生产环境可考虑使用 nonce 或 hash 替代
-		c.Header("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'self'")
+		c.Header("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'")
 
 		c.Next()
 	}

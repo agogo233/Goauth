@@ -242,6 +242,62 @@ func (h *UserHandler) RemoveTotp(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "TOTP 已移除"})
 }
 
+// GenerateBackupCodes 生成 TOTP 备用码
+func (h *UserHandler) GenerateBackupCodes(c *gin.Context) {
+	userIDVal, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "未登录"})
+		return
+	}
+	userID, ok := userIDVal.(string)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "内部错误"})
+		return
+	}
+
+	codes, err := h.totpService.GenerateBackupCodes(c.Request.Context(), userID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "生成备用码失败"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"codes": codes})
+}
+
+// VerifyBackupCode 验证 TOTP 备用码
+func (h *UserHandler) VerifyBackupCode(c *gin.Context) {
+	userIDVal, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "未登录"})
+		return
+	}
+	userID, ok := userIDVal.(string)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "内部错误"})
+		return
+	}
+
+	var req struct {
+		Code string `json:"code" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的请求"})
+		return
+	}
+
+	valid, err := h.totpService.ValidateBackupCode(c.Request.Context(), userID, req.Code)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "验证失败"})
+		return
+	}
+	if !valid {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的备用码"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"valid": true})
+}
+
 // GetSessions 获取所有 Session
 func (h *UserHandler) GetSessions(c *gin.Context) {
 	userIDVal, exists := c.Get("userID")

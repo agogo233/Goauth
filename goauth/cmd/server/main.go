@@ -478,6 +478,9 @@ func setupRouter(
 			user.DELETE("/totp", userHandler.RemoveTotp)
 			user.GET("/sessions", userHandler.GetSessions)
 			user.DELETE("/sessions/:id", userHandler.TerminateSession)
+			// TOTP 备用码
+			user.GET("/totp/backup-codes", userHandler.GenerateBackupCodes)
+			user.POST("/totp/verify-backup-code", userHandler.VerifyBackupCode)
 		}
 
 		// MFA setup routes (accessible by pwd-mfa-setup-required users)

@@ -101,7 +101,18 @@ func (r *GroupRepo) RemoveUserFromGroup(ctx context.Context, userID, groupID str
 	return err
 }
 
-// GetUserGroups 获取用户的分组
+// FindByUserID 获取用户所属分组（包含完整 Group 信息，用于 N+1 查询优化）
+func (r *GroupRepo) FindByUserID(ctx context.Context, userID string) ([]*model.Group, error) {
+	var groups []*model.Group
+	err := r.db.SelectContext(ctx, &groups, `
+		SELECT g.* FROM groups g
+		INNER JOIN user_groups ug ON g.id = ug.groupId
+		WHERE ug.userId = ?
+	`, userID)
+	return groups, err
+}
+
+// GetUserGroups 获取用户的分组（保持向后兼容）
 func (r *GroupRepo) GetUserGroups(ctx context.Context, userID string) ([]*model.GroupRef, error) {
 	var groups []*model.GroupRef
 	err := r.db.SelectContext(ctx, &groups, `

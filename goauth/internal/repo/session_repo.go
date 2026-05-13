@@ -95,7 +95,7 @@ func (r *SessionRepo) DeleteExpired(ctx context.Context) error {
 
 // UpdateExpiresAt 更新 Session 过期时间
 func (r *SessionRepo) UpdateExpiresAt(ctx context.Context, id string, expiresAt model.CustomTime) error {
-	_, err := r.db.ExecContext(ctx, `UPDATE sessions SET expiresAt = ? WHERE id = ?`, expiresAt, id)
+	_, err := r.db.ExecContext(ctx, `UPDATE sessions SET expiresAt = ?, lastRefreshedAt = ? WHERE id = ?`, expiresAt, model.Now(), id)
 	return err
 }
 

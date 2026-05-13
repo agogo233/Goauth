@@ -162,71 +162,56 @@ func (s *Storage) CheckUsernamePassword(ctx context.Context, username, password 
 
 // --- op.OPStorage 接口实现 ---
 
-// GetClientByClientID 获取客户端
-// 优先从 clients 表读取（通过 Admin API 创建），如果没有再从 oidc_payloads 表读取（通过 OIDC API 创建）
+// GetClientByClientID 获取客户端（以 clients 表为唯一数据源）
+// 修复：不再从 oidc_payloads 读取客户端，避免双写不同步
 func (s *Storage) GetClientByClientID(ctx context.Context, clientID string) (op.Client, error) {
-	// 1. 首先尝试从 clients 表读取
-	if s.clientRepo != nil {
-		dbClient, err := s.clientRepo.FindByID(ctx, clientID)
-		if err == nil && dbClient != nil {
-			// 转换为 OIDC Client 格式
-			var redirectURIs []string
-			if dbClient.RedirectURIs != "" {
-				json.Unmarshal([]byte(dbClient.RedirectURIs), &redirectURIs)
-			}
-			var scopes []string
-			if dbClient.Scopes != "" {
-				json.Unmarshal([]byte(dbClient.Scopes), &scopes)
-			}
-			var grantTypes []oidc.GrantType
-			if dbClient.GrantTypes != "" {
-				var gtStrings []string
-				json.Unmarshal([]byte(dbClient.GrantTypes), &gtStrings)
-				for _, gt := range gtStrings {
-					grantTypes = append(grantTypes, oidc.GrantType(gt))
-				}
-			}
-			var responseTypes []oidc.ResponseType
-			if dbClient.ResponseTypes != "" {
-				var rtStrings []string
-				json.Unmarshal([]byte(dbClient.ResponseTypes), &responseTypes)
-				for _, rt := range rtStrings {
-					responseTypes = append(responseTypes, oidc.ResponseType(rt))
-				}
-			}
-
-			return &Client{
-				ID_:                     dbClient.ID,
-				Secret_:                 ptrToString(dbClient.Secret),
-				Name_:                   dbClient.Name,
-				RedirectURIs_:           redirectURIs,
-				PostLogoutRedirectURIs_: []string{},
-				ApplicationType_:        op.ApplicationTypeWeb,
-				ResponseTypes_:          responseTypes,
-				GrantTypes_:             grantTypes,
-				AccessTokenType_:        op.AccessTokenTypeBearer,
-				IDTokenLifetime_:        30 * 60 * 1000000000, // 30 分钟
-				DevMode_:                false,
-				ClockSkew_:              0,
-				Scopes_:                 scopes,
-				SkipConsent_:            dbClient.Trusted,
-				Trusted_:                dbClient.Trusted,
-			}, nil
-		}
-	}
-
-	// 2. 如果 clients 表没有，尝试从 oidc_payloads 表读取
-	payload, err := s.oidcRepo.FindByIDAndType(ctx, clientID, "client")
-	if err != nil {
+	dbClient, err := s.clientRepo.FindByID(ctx, clientID)
+	if err != nil || dbClient == nil {
 		return nil, ErrInvalidClient
 	}
 
-	var client Client
-	if err := json.Unmarshal([]byte(payload.Payload), &client); err != nil {
-		return nil, err
+	var redirectURIs []string
+	if dbClient.RedirectURIs != "" {
+		json.Unmarshal([]byte(dbClient.RedirectURIs), &redirectURIs)
+	}
+	var scopes []string
+	if dbClient.Scopes != "" {
+		json.Unmarshal([]byte(dbClient.Scopes), &scopes)
+	}
+	var grantTypes []oidc.GrantType
+	if dbClient.GrantTypes != "" {
+		var gtStrings []string
+		json.Unmarshal([]byte(dbClient.GrantTypes), &gtStrings)
+		for _, gt := range gtStrings {
+			grantTypes = append(grantTypes, oidc.GrantType(gt))
+		}
+	}
+	var responseTypes []oidc.ResponseType
+	if dbClient.ResponseTypes != "" {
+		var rtStrings []string
+		json.Unmarshal([]byte(dbClient.ResponseTypes), &rtStrings)
+		for _, rt := range rtStrings {
+			responseTypes = append(responseTypes, oidc.ResponseType(rt))
+		}
 	}
 
-	return &client, nil
+	return &Client{
+		ID_:                     dbClient.ID,
+		Secret_:                 ptrToString(dbClient.Secret),
+		Name_:                   dbClient.Name,
+		RedirectURIs_:           redirectURIs,
+		PostLogoutRedirectURIs_: []string{},
+		ApplicationType_:        op.ApplicationTypeWeb,
+		ResponseTypes_:          responseTypes,
+		GrantTypes_:             grantTypes,
+		AccessTokenType_:        op.AccessTokenTypeBearer,
+		IDTokenLifetime_:        30 * 60 * 1000000000,
+		DevMode_:                false,
+		ClockSkew_:              0,
+		Scopes_:                 scopes,
+		SkipConsent_:            dbClient.Trusted,
+Trusted_:                dbClient.Trusted,
+	}, nil
 }
 
 // ptrToString safely dereferences a string pointer
@@ -357,10 +342,15 @@ func (s *Storage) AuthRequestByID(ctx context.Context, id string) (op.AuthReques
 	return &req, nil
 }
 
-// AuthRequestByCode 根据授权码获取授权请求
+// AuthRequestByCode 根据授权码获取授权请求（已验证一次性使用）
 func (s *Storage) AuthRequestByCode(ctx context.Context, code string) (op.AuthRequest, error) {
 	payload, err := s.oidcRepo.FindByIDAndType(ctx, code, "auth_code")
 	if err != nil {
+		return nil, ErrInvalidRequest
+	}
+
+	// 检查是否已被消费（授权码一次性使用）
+	if payload.ConsumedAt != nil && !payload.ConsumedAt.Time.IsZero() {
 		return nil, ErrInvalidRequest
 	}
 
@@ -368,6 +358,9 @@ func (s *Storage) AuthRequestByCode(ctx context.Context, code string) (op.AuthRe
 	if err := json.Unmarshal([]byte(payload.Payload), &req); err != nil {
 		return nil, err
 	}
+
+	// 标记授权码为已消费，确保只能使用一次
+	_ = s.oidcRepo.Consume(ctx, code, "auth_code")
 
 	return &req, nil
 }
@@ -456,13 +449,19 @@ func (s *Storage) CreateAccessToken(ctx context.Context, req op.TokenRequest) (s
 	return tokenID, exp, nil
 }
 
-// CreateAccessAndRefreshTokens 创建访问令牌和刷新令牌
+// CreateAccessAndRefreshTokens 创建访问令牌和刷新令牌（支持令牌轮换）
 func (s *Storage) CreateAccessAndRefreshTokens(ctx context.Context, req op.TokenRequest, currentRefreshToken string) (string, string, time.Time, error) {
 	accessToken, exp, err := s.CreateAccessToken(ctx, req)
 	if err != nil {
 		return "", "", time.Time{}, err
 	}
 
+	// 令牌轮换：作废旧刷新令牌
+	if currentRefreshToken != "" {
+		_ = s.oidcRepo.Delete(ctx, currentRefreshToken, "refresh_token")
+	}
+
+	// 生成新刷新令牌
 	refreshToken, err := generateID()
 	if err != nil {
 		return "", "", time.Time{}, err
@@ -484,7 +483,10 @@ func (s *Storage) CreateAccessAndRefreshTokens(ctx context.Context, req op.Token
 		ExpiresAt: ptrCustomTime(refreshExp),
 	}
 
-	_ = s.oidcRepo.Create(ctx, oidcPayload)
+	// 使用 Create 而不是忽略错误，确保持久化成功
+	if err := s.oidcRepo.Create(ctx, oidcPayload); err != nil {
+		return "", "", time.Time{}, err
+	}
 
 	return accessToken, refreshToken, exp, nil
 }

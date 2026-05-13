@@ -40,16 +40,16 @@ type CSRFConfig struct {
 	ErrorFunc func(c *gin.Context)
 }
 
-// DefaultCSRFConfig 默认配置
+// DefaultCSRFConfig 默认配置（安全加固）
 func DefaultCSRFConfig() CSRFConfig {
 	return CSRFConfig{
 		TokenLookup:    "header:" + CSRFHeaderName,
 		CookieName:     CSRFCookieName,
 		CookiePath:     "/",
 		CookieDomain:   "",
-		CookieSecure:   false,
-		CookieSameSite: http.SameSiteLaxMode,
-		CookieHTTPOnly: false, // 前端需要读取
+		CookieSecure:   true, // 强制 Secure，部署时要求 HTTPS
+		CookieSameSite: http.SameSiteStrictMode, // 从 Lax 升级为 Strict，防止 CSRF
+		CookieHTTPOnly: false, // 前端需要读取以附加到 header
 		SkipPaths:      []string{},
 		ErrorFunc: func(c *gin.Context) {
 			c.JSON(http.StatusForbidden, gin.H{"error": "CSRF token 无效"})

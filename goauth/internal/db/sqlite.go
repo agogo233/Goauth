@@ -92,7 +92,7 @@ func (db *DB) RunMigrations() error {
 			updatedAt TEXT NOT NULL
 		)`,
 
-		// Sessions table
+		// Sessions table with lastRefreshedAt (v0.0.2)
 		`CREATE TABLE IF NOT EXISTS sessions (
 			id TEXT PRIMARY KEY,
 			userId TEXT NOT NULL,
@@ -101,6 +101,8 @@ func (db *DB) RunMigrations() error {
 			rememberMe INTEGER DEFAULT 0,
 			expiresAt TEXT NOT NULL,
 			createdAt TEXT NOT NULL,
+			lastRefreshedAt TEXT,
+			totpAttempts INTEGER DEFAULT 0,
 			FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE
 		)`,
 
@@ -174,6 +176,14 @@ func (db *DB) RunMigrations() error {
 			createdAt TEXT NOT NULL,
 			updatedAt TEXT NOT NULL,
 			FOREIGN KEY (createdBy) REFERENCES users(id)
+		)`,
+
+		// TOTP Backup Codes table (v0.0.2)
+		`CREATE TABLE IF NOT EXISTS totp_backup_codes (
+			userId TEXT PRIMARY KEY NOT NULL,
+			codesHash TEXT NOT NULL,
+			createdAt TEXT NOT NULL,
+			FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE
 		)`,
 
 		// Consent table

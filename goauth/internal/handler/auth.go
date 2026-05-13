@@ -134,6 +134,19 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	c.JSON(http.StatusOK, resp)
 }
 
+// isValidTotpCode 验证 TOTP 验证码格式（必须是 6 位数字）
+func isValidTotpCode(code string) bool {
+	if len(code) != 6 {
+		return false
+	}
+	for _, c := range code {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
+}
+
 // TotpLogin TOTP 验证登录
 func (h *AuthHandler) TotpLogin(c *gin.Context) {
 	// 从 cookie 获取临时 token
@@ -148,6 +161,12 @@ func (h *AuthHandler) TotpLogin(c *gin.Context) {
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的请求"})
+		return
+	}
+
+	// 验证验证码格式
+	if !isValidTotpCode(req.Code) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "验证码必须是 6 位数字"})
 		return
 	}
 

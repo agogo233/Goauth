@@ -164,14 +164,15 @@ type Flag struct {
 
 // Session 会话模型
 type Session struct {
-	ID           string     `db:"id" json:"id"`
-	UserID       string     `db:"userId" json:"userId"`
-	Token        string     `db:"token" json:"-"`
-	AMR          string     `db:"amr" json:"amr"` // Authentication Methods References
-	TotpAttempts int        `db:"totpAttempts" json:"totpAttempts"` // TOTP 尝试次数
-	RememberMe   bool       `db:"rememberMe" json:"rememberMe"`
-	ExpiresAt    CustomTime `db:"expiresAt" json:"expiresAt"`
-	CreatedAt    CustomTime `db:"createdAt" json:"createdAt"`
+	ID                string     `db:"id" json:"id"`
+	UserID            string     `db:"userId" json:"userId"`
+	Token             string     `db:"token" json:"-"`
+	AMR               string     `db:"amr" json:"amr"` // Authentication Methods References
+	TotpAttempts      int        `db:"totpAttempts" json:"totpAttempts"` // TOTP 尝试次数
+	RememberMe        bool       `db:"rememberMe" json:"rememberMe"`
+	ExpiresAt         CustomTime `db:"expiresAt" json:"expiresAt"`
+	CreatedAt         CustomTime `db:"createdAt" json:"createdAt"`
+	LastRefreshedAt   CustomTime `db:"lastRefreshedAt" json:"-"` // 最近一次滑动续期时间
 }
 
 // Client OIDC客户端模型

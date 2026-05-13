@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -144,18 +145,67 @@ func (s *TotpService) IsEnabled(ctx context.Context, userID string) (bool, error
 	return count > 0, err
 }
 
-// GenerateBackupCodes 生成备用码
+// GenerateBackupCodes 生成并存储 TOTP 备用码
 func (s *TotpService) GenerateBackupCodes(ctx context.Context, userID string) ([]string, error) {
 	codes := make([]string, 10)
+	hashes := make([]string, 10)
 	for i := 0; i < 10; i++ {
 		b := make([]byte, 4)
 		rand.Read(b)
-		codes[i] = fmt.Sprintf("%s-%s", 
+		codes[i] = fmt.Sprintf("%s-%s",
 			base64.RawURLEncoding.EncodeToString(b[:2]),
-			base64.RawURLEncoding.EncodeToString(b[2:]),
-		)
+			base64.RawURLEncoding.EncodeToString(b[2:]))
+		hash, err := util.HashPassword(codes[i])
+		if err != nil {
+			return nil, err
+		}
+		hashes[i] = hash
 	}
+
+	data, err := json.Marshal(hashes)
+	if err != nil {
+		return nil, err
+	}
+
+	now := model.Now()
+	_, err = s.db.ExecContext(ctx, `
+		INSERT INTO totp_backup_codes (userId, codesHash, createdAt)
+		VALUES (?, ?, ?)
+		ON CONFLICT(userId) DO UPDATE SET codesHash = ?, createdAt = ?
+	`, userID, string(data), now, string(data), now)
+	if err != nil {
+		return nil, err
+	}
+
 	return codes, nil
+}
+
+// ValidateBackupCode 验证 TOTP 备用码，验证通过后该码作废
+func (s *TotpService) ValidateBackupCode(ctx context.Context, userID, code string) (bool, error) {
+	var codesHash string
+	err := s.db.GetContext(ctx, &codesHash, `SELECT codesHash FROM totp_backup_codes WHERE userId = ?`, userID)
+	if err != nil {
+		return false, err
+	}
+
+	var hashes []string
+	if err := json.Unmarshal([]byte(codesHash), &hashes); err != nil {
+		return false, err
+	}
+
+	for i, h := range hashes {
+		if h != "" {
+			valid, err := util.VerifyPassword(code, h)
+			if err == nil && valid {
+				// 作废已使用的备用码
+				hashes[i] = ""
+				data, _ := json.Marshal(hashes)
+				s.db.ExecContext(ctx, `UPDATE totp_backup_codes SET codesHash = ? WHERE userId = ?`, data, userID)
+				return true, nil
+			}
+		}
+	}
+	return false, nil
 }
 
 // ValidateUri 验证 otpauth URI

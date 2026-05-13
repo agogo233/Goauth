@@ -158,13 +158,11 @@ func (s *AuthService) Login(ctx context.Context, req *LoginRequest, ip string) (
 	// 检查是否被要求 MFA（用户级别或分组级别）
 	mfaRequired := user.MFARequired
 	if !mfaRequired {
-		// 检查用户所在分组是否要求 MFA
-		groups, err := s.groupRepo.GetUserGroups(ctx, user.ID)
+		// 使用批量查询替代 N+1
+		groups, err := s.groupRepo.FindByUserID(ctx, user.ID)
 		if err == nil {
 			for _, g := range groups {
-				// 需要查询分组的 MFARequired 字段
-				group, err := s.groupRepo.FindByID(ctx, g.ID)
-				if err == nil && group.MFARequired {
+				if g.MFARequired {
 					mfaRequired = true
 					break
 				}
@@ -392,10 +390,10 @@ func (s *AuthService) ValidateSessionWithAMR(ctx context.Context, token string) 
 
 // RefreshSession 刷新 Session 过期时间（滑动过期）
 // 当 session 剩余时间少于 TTL 的一半时，自动续期
+// 通过 LastRefreshedAt 防抖，避免同一周期内重复写库
 // 返回新的过期时间，如果不需要续期则返回原过期时间
 func (s *AuthService) RefreshSession(ctx context.Context, session *model.Session) (time.Time, error) {
 	now := time.Now()
-	remaining := session.ExpiresAt.Time.Sub(now)
 
 	// 确定 session 的完整 TTL
 	var ttl time.Duration
@@ -404,6 +402,16 @@ func (s *AuthService) RefreshSession(ctx context.Context, session *model.Session
 	} else {
 		ttl = s.cfg.Session.TTL
 	}
+
+	// 防抖：距离上次续期不足 TTL/4 则跳过，减少写操作
+	if !session.LastRefreshedAt.Time.IsZero() {
+		sinceLastRefresh := now.Sub(session.LastRefreshedAt.Time)
+		if sinceLastRefresh < ttl/4 {
+			return session.ExpiresAt.Time, nil
+		}
+	}
+
+	remaining := session.ExpiresAt.Time.Sub(now)
 
 	// 只有当剩余时间少于 TTL 的一半时才续期
 	if remaining > ttl/2 {

@@ -159,7 +159,7 @@ func (s *UserService) ApproveUser(ctx context.Context, userID string) error {
 	}
 
 	user.Approved = true
-	user.EmailVerified = true // 审批时自动验证邮箱
+	// 修复：审批时不自动验证邮箱，让用户自行通过邮件链接验证
 	return s.userRepo.Update(ctx, user)
 }
 

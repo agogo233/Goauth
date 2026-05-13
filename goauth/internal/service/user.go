@@ -121,7 +121,12 @@ func (s *UserService) UpdatePassword(ctx context.Context, userID string, oldPass
 	}
 
 	user.PasswordHash = &passwordHash
-	return s.userRepo.Update(ctx, user)
+	if err := s.userRepo.Update(ctx, user); err != nil {
+		return err
+	}
+
+	_ = s.sessionRepo.DeleteByUserID(ctx, userID)
+	return nil
 }
 
 // AdminResetPassword 管理员重置密码

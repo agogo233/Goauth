@@ -89,14 +89,23 @@ func (s *InvitationService) GetInvitationByChallenge(ctx context.Context, challe
 }
 
 // ValidateInvitation 验证邀请是否有效
-func (s *InvitationService) ValidateInvitation(ctx context.Context, challenge string) (*model.Invitation, []string, error) {
-	invitation, groupIDs, err := s.GetInvitationByChallenge(ctx, challenge)
+// token 可以是邀请 ID（UUID）或 Challenge 码
+func (s *InvitationService) ValidateInvitation(ctx context.Context, token string) (*model.Invitation, []string, error) {
+	invitation, err := s.invitationRepo.FindByID(ctx, token)
 	if err != nil {
-		return nil, nil, err
+		invitation, err = s.invitationRepo.FindByChallenge(ctx, token)
+		if err != nil {
+			return nil, nil, err
+		}
 	}
 
 	if invitation.ExpiresAt.Before(time.Now()) {
 		return nil, nil, ErrInvitationExpired
+	}
+
+	groupIDs, err := s.invitationRepo.GetInvitationGroups(ctx, invitation.ID)
+	if err != nil {
+		return nil, nil, err
 	}
 
 	return invitation, groupIDs, nil

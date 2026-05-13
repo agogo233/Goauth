@@ -6,7 +6,7 @@
   <title>Goauth</title>
   <link rel="icon" href="/assets/logo.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/css/style.css">
-  <script src="/js/alpine.min.js" defer></script>
+  <script src="/js/alpine.min.js" defer nonce="__CSP_NONCE__"></script>
 </head>
 <body x-data="app()" x-init="init()">
   <!-- 加载状态屏幕 - Alpine.js 初始化前显示，初始化后隐藏 -->
@@ -133,6 +133,7 @@
           <button @click="adminTab = 'clients'; loadClients()" :class="{ active: adminTab === 'clients' }">客户端</button>
           <button @click="adminTab = 'invitations'; loadInvitations()" :class="{ active: adminTab === 'invitations' }">邀请</button>
           <button @click="adminTab = 'proxyauth'; loadProxyAuths(); loadGroups()" :class="{ active: adminTab === 'proxyauth' }">代理认证</button>
+          <button @click="adminTab = 'auditlogs'; loadAuditLogs()" :class="{ active: adminTab === 'auditlogs' }">审计日志</button>
         </div>
 
         <!-- Users Tab -->
@@ -168,6 +169,11 @@
               </template>
             </tbody>
           </table>
+          <div class="pagination" x-show="userTotal > userLimit">
+            <button @click="prevPage()" :disabled="userOffset < userLimit" class="btn btn-sm">上一页</button>
+            <span class="page-info" x-text="'第 ' + (Math.floor(userOffset/userLimit)+1) + '/' + (Math.ceil(userTotal/userLimit)) + ' 页，共 ' + userTotal + ' 条'"></span>
+            <button @click="nextPage()" :disabled="userOffset + userLimit >= userTotal" class="btn btn-sm">下一页</button>
+          </div>
         </div>
 
         <!-- Groups Tab -->
@@ -210,7 +216,7 @@
         <div x-show="adminTab === 'clients'">
           <div class="section-header">
             <h3>OIDC客户端</h3>
-            <button @click="showClientModal = true; clientForm = {id: '', secret: '', name: '', redirectUris: '', scopes: 'openid profile email', trusted: false}" class="btn btn-primary btn-sm">新建客户端</button>
+            <button @click="openNewClientModal()" class="btn btn-primary btn-sm">新建客户端</button>
           </div>
           <table class="table">
             <thead>
@@ -237,6 +243,7 @@
                     <span x-show="!client.trusted" class="badge badge-secondary">否</span>
                   </td>
                   <td>
+                    <button @click="openEditClientModal(client)" class="btn btn-sm">编辑</button>
                     <button @click="deleteClient(client.id)" class="btn btn-sm btn-danger">删除</button>
                   </td>
                 </tr>
@@ -311,6 +318,34 @@
               </template>
             </tbody>
           </table>
+        <!-- Audit Logs Tab -->
+        <div x-show="adminTab === 'auditlogs'">
+          <div class="section-header">
+            <h3>审计日志</h3>
+          </div>
+          <table class="table">
+            <thead>
+              <tr>
+                <th>时间</th>
+                <th>操作</th>
+                <th>操作者</th>
+                <th>目标</th>
+                <th>IP</th>
+              </tr>
+            </thead>
+            <tbody>
+              <template x-for="log in auditLogs" :key="log.id">
+                <tr>
+                  <td x-text="formatDate(log.createdAt)"></td>
+                  <td><span class="badge" x-text="log.action"></span></td>
+                  <td x-text="log.actorId || '-'"></td>
+                  <td x-text="log.targetId || '-'"></td>
+                  <td x-text="log.ip"></td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+          <p x-show="auditLogs.length === 0" class="empty-hint">暂无审计日志</p>
         </div>
       </div>
 
@@ -451,11 +486,12 @@
       </div>
     </div>
 
-    <!-- 创建客户端弹窗 -->
+    <!-- 创建/编辑客户端弹窗 -->
     <div x-show="showClientModal" x-cloak class="modal-overlay" @click.self="showClientModal = false">
       <div class="modal">
-        <h2>新建 OIDC 客户端</h2>
-        <form @submit.prevent="createClient()">
+        <h2 x-text="editingClientId ? '编辑 OIDC 客户端' : '新建 OIDC 客户端'"></h2>
+        <form @submit.prevent="saveClient()">
+          <input type="hidden" x-model="clientForm.id">
           <div class="form-group">
             <label for="client-id">客户端 ID</label>
             <input type="text" id="client-id" x-model="clientForm.id" required placeholder="my-app">

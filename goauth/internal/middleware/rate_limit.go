@@ -9,11 +9,12 @@ import (
 
 // RateLimiter 速率限制器
 type RateLimiter struct {
-	visitors map[string]*visitor
-	mu       sync.RWMutex
-	rate     int           // 请求数
-	window   time.Duration // 时间窗口
-	done     chan struct{} // 用于优雅停止 cleanup goroutine
+	visitors    map[string]*visitor
+	mu          sync.RWMutex
+	rate        int           // 请求数
+	window      time.Duration // 时间窗口
+	maxVisitors int           // 最大访问者数（0 = 无限制）
+	done        chan struct{} // 用于优雅停止 cleanup goroutine
 }
 
 type visitor struct {
@@ -22,15 +23,24 @@ type visitor struct {
 }
 
 // NewRateLimiter 创建速率限制器
+// maxVisitors 为最大访问者数，0 表示使用默认值 10000
 func NewRateLimiter(rate int, window time.Duration) *RateLimiter {
+	return NewRateLimiterWithMax(rate, window, 10000)
+}
+
+// NewRateLimiterWithMax 创建速率限制器，可指定最大访问者数
+func NewRateLimiterWithMax(rate int, window time.Duration, maxVisitors int) *RateLimiter {
+	if maxVisitors <= 0 {
+		maxVisitors = 10000
+	}
 	limiter := &RateLimiter{
-		visitors: make(map[string]*visitor),
-		rate:     rate,
-		window:   window,
-		done:     make(chan struct{}),
+		visitors:    make(map[string]*visitor),
+		rate:        rate,
+		window:      window,
+		maxVisitors: maxVisitors,
+		done:        make(chan struct{}),
 	}
 
-	// 定期清理过期记录
 	go limiter.cleanup()
 
 	return limiter
@@ -48,6 +58,10 @@ func (rl *RateLimiter) Allow(ip string) bool {
 
 	v, exists := rl.visitors[ip]
 	if !exists || time.Since(v.lastSeen) > rl.window {
+		// 达到最大访问者数时，拒绝新的访问者
+		if !exists && len(rl.visitors) >= rl.maxVisitors {
+			return false
+		}
 		rl.visitors[ip] = &visitor{
 			lastSeen: time.Now(),
 			count:    1,

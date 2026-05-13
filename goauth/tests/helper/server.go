@@ -79,11 +79,11 @@ func NewTestServer(t *testing.T) *TestServer {
 	// 创建 services
 	protector := util.NewBruteForceProtector(database, cfg.Security.LoginMaxAttempts, cfg.Security.LoginBlockDuration)
 	totpService := service.NewTotpService(database, cfg)
-	authService := service.NewAuthService(userRepo, sessionRepo, groupRepo, totpService, protector, cfg)
+	invitationService := service.NewInvitationService(invitationRepo, groupRepo, database)
+	authService := service.NewAuthService(userRepo, sessionRepo, groupRepo, totpService, invitationService, protector, cfg)
 	userService := service.NewUserService(userRepo, sessionRepo, groupRepo, database, cfg)
 	groupService := service.NewGroupService(groupRepo, database)
 	auditService := service.NewAuditService(database)
-	invitationService := service.NewInvitationService(invitationRepo, groupRepo, database)
 
 	// 创建 handlers
 	authHandler := handler.NewAuthHandler(authService, userService, auditService, cfg)
@@ -432,8 +432,8 @@ func setupTestRouter(authHandler *handler.AuthHandler, userHandler *handler.User
 		user.Use(authMiddleware.RequireAuth())
 		{
 			user.GET("/me", userHandler.GetMe)
-			user.PATCH("/profile", authHandler.UpdateProfile)
-			user.PATCH("/password", authHandler.UpdatePassword)
+			user.PATCH("/profile", userHandler.UpdateProfile)
+			user.PATCH("/password", userHandler.UpdatePassword)
 			user.DELETE("/totp", userHandler.RemoveTotp)
 		}
 

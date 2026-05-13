@@ -288,8 +288,16 @@ test.describe('邀请管理', () => {
     // 等待表单更新
     await page.waitForTimeout(500);
 
+    // 处理即将出现的 prompt 对话框
+    const promptPromise = page.waitForEvent('dialog');
+
     // 点击创建按钮 - 使用 exact: true 精确匹配
     await page.getByRole('button', { name: '创建', exact: true }).click();
+
+    // 接受 prompt 对话框
+    const dialog = await promptPromise;
+    await dialog.accept();
+
     await page.waitForTimeout(1000);
 
     // 验证邀请创建成功 - 检查邮箱是否出现在表格中

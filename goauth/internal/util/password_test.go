@@ -128,12 +128,15 @@ func TestGenerateRandomPassword(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			password := GenerateRandomPassword(tt.length)
+			password, err := GenerateRandomPassword(tt.length)
+			if err != nil {
+				t.Fatalf("GenerateRandomPassword() error = %v", err)
+			}
 			if len(password) != tt.length {
 				t.Errorf("GenerateRandomPassword() length = %v, want %v", len(password), tt.length)
 			}
 			// 生成多个密码，检查它们是否不同
-			password2 := GenerateRandomPassword(tt.length)
+			password2, _ := GenerateRandomPassword(tt.length)
 			if password == password2 {
 				t.Log("Warning: two generated passwords are the same (unlikely but possible)")
 			}

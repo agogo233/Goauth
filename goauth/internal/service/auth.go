@@ -17,25 +17,27 @@ import (
 )
 
 var (
-	ErrInvalidCredentials = errors.New("用户名或密码错误")
-	ErrUserNotFound       = errors.New("用户不存在")
-	ErrUserNotApproved    = errors.New("用户未批准")
-	ErrUserDisabled       = errors.New("用户已被禁用")
-	ErrUserUnverified     = errors.New("邮箱未验证")
-	ErrAccountLocked      = errors.New("账户已锁定，请稍后重试")
-	ErrTotpRequired       = errors.New("需要 TOTP 验证")
-	ErrInvalidTotpCode    = errors.New("无效的 TOTP 验证码")
-	ErrUsernameEmpty      = errors.New("用户名不能为空")
+	ErrInvalidCredentials  = errors.New("用户名或密码错误")
+	ErrUserNotFound        = errors.New("用户不存在")
+	ErrUserNotApproved     = errors.New("用户未批准")
+	ErrUserDisabled        = errors.New("用户已被禁用")
+	ErrUserUnverified      = errors.New("邮箱未验证")
+	ErrAccountLocked       = errors.New("账户已锁定，请稍后重试")
+	ErrTotpRequired        = errors.New("需要 TOTP 验证")
+	ErrInvalidTotpCode     = errors.New("无效的 TOTP 验证码")
+	ErrUsernameEmpty       = errors.New("用户名不能为空")
+	ErrInviteInvalid       = errors.New("邀请链接无效或已过期")
 )
 
 // AuthService 认证服务
 type AuthService struct {
-	userRepo    *repo.UserRepo
-	sessionRepo *repo.SessionRepo
-	groupRepo   *repo.GroupRepo
-	totpService *TotpService
-	protector   *util.BruteForceProtector
-	cfg         *config.Config
+	userRepo          *repo.UserRepo
+	sessionRepo       *repo.SessionRepo
+	groupRepo         *repo.GroupRepo
+	totpService       *TotpService
+	invitationService *InvitationService
+	protector         *util.BruteForceProtector
+	cfg               *config.Config
 }
 
 // NewAuthService 创建认证服务
@@ -44,16 +46,18 @@ func NewAuthService(
 	sessionRepo *repo.SessionRepo,
 	groupRepo *repo.GroupRepo,
 	totpService *TotpService,
+	invitationService *InvitationService,
 	protector *util.BruteForceProtector,
 	cfg *config.Config,
 ) *AuthService {
 	return &AuthService{
-		userRepo:    userRepo,
-		sessionRepo: sessionRepo,
-		groupRepo:   groupRepo,
-		totpService: totpService,
-		protector:   protector,
-		cfg:         cfg,
+		userRepo:          userRepo,
+		sessionRepo:       sessionRepo,
+		groupRepo:         groupRepo,
+		totpService:       totpService,
+		invitationService: invitationService,
+		protector:         protector,
+		cfg:               cfg,
 	}
 }
 
@@ -432,10 +436,11 @@ func (s *AuthService) RefreshSession(ctx context.Context, session *model.Session
 
 // RegisterRequest 注册请求
 type RegisterRequest struct {
-	Username string  `json:"username"`
-	Password string  `json:"password"`
-	Email    *string `json:"email"`
-	Name     *string `json:"name"`
+	Username    string  `json:"username"`
+	Password    string  `json:"password"`
+	Email       *string `json:"email"`
+	Name        *string `json:"name"`
+	InviteToken *string `json:"inviteToken"`
 }
 
 // RegisterResponse 注册响应
@@ -446,25 +451,38 @@ type RegisterResponse struct {
 
 // Register 注册
 func (s *AuthService) Register(ctx context.Context, req *RegisterRequest) (*RegisterResponse, error) {
-	// 验证用户名不为空
 	if req.Username == "" {
 		return nil, ErrUsernameEmpty
 	}
 
-	// 验证邮箱格式（如果提供）
 	if req.Email != nil && *req.Email != "" && !util.IsValidEmail(*req.Email) {
 		return nil, util.ErrEmailInvalid
 	}
 
-	// 检查密码强度
 	if err := util.CheckPasswordStrength(req.Password, s.cfg.Security.PasswordMin, s.cfg.Security.PasswordMinScore); err != nil {
 		return nil, err
 	}
 
-	// 哈希密码
 	passwordHash, err := util.HashPassword(req.Password)
 	if err != nil {
 		return nil, err
+	}
+
+	// 解析邀请（如果提供了邀请 token）
+	var (
+		inv             *model.Invitation
+		inviteGroupIDs  []string
+		hasValidInvite  bool
+	)
+	if req.InviteToken != nil && *req.InviteToken != "" {
+		var groupIDs []string
+		var err error
+		inv, groupIDs, err = s.invitationService.ValidateInvitation(ctx, *req.InviteToken)
+		if err != nil {
+			return nil, ErrInviteInvalid
+		}
+		inviteGroupIDs = groupIDs
+		hasValidInvite = true
 	}
 
 	// 检查是否是第一个用户（自动成为管理员）
@@ -474,17 +492,13 @@ func (s *AuthService) Register(ctx context.Context, req *RegisterRequest) (*Regi
 	}
 	isFirstUser := count == 0
 
-	// 确定是否批准用户
-	// 第一个用户总是自动批准
-	// 如果配置了 AutoApproveUsers，所有用户都自动批准
-	approved := isFirstUser || s.cfg.Security.AutoApproveUsers
+	approved := isFirstUser || s.cfg.Security.AutoApproveUsers || hasValidInvite
 
-	// 确定邮箱验证状态
-	// 第一个用户总是自动验证
-	// 如果配置了 AutoApproveUsers，所有用户都自动验证（测试环境）
 	emailVerified := isFirstUser || s.cfg.Security.AutoApproveUsers
+	if hasValidInvite && inv.EmailVerified {
+		emailVerified = true
+	}
 
-	// 创建用户
 	user := &model.User{
 		Username:      req.Username,
 		PasswordHash:  &passwordHash,
@@ -499,8 +513,13 @@ func (s *AuthService) Register(ctx context.Context, req *RegisterRequest) (*Regi
 		return nil, err
 	}
 
+	// 如果有邀请关联分组，自动将用户加入分组
+	for _, groupID := range inviteGroupIDs {
+		_ = s.groupRepo.AddUserToGroup(ctx, user.ID, groupID)
+	}
+
 	message := "注册成功"
-	if !isFirstUser {
+	if !approved {
 		message = "注册成功，请等待管理员审批"
 	}
 

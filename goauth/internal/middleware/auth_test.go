@@ -115,9 +115,11 @@ func setupAuthMiddleware(t *testing.T) (*sqlx.DB, *AuthMiddleware, *service.Auth
 	userRepo := repo.NewUserRepo(db)
 	sessionRepo := repo.NewSessionRepo(db)
 	groupRepo := repo.NewGroupRepo(db)
+	invitationRepo := repo.NewInvitationRepo(db)
 	totpService := service.NewTotpService(db, cfg)
 	protector := util.NewBruteForceProtector(db, cfg.Security.LoginMaxAttempts, cfg.Security.LoginBlockDuration)
-	authService := service.NewAuthService(userRepo, sessionRepo, groupRepo, totpService, protector, cfg)
+	invitationService := service.NewInvitationService(invitationRepo, groupRepo, db)
+	authService := service.NewAuthService(userRepo, sessionRepo, groupRepo, totpService, invitationService, protector, cfg)
 	authMiddleware := NewAuthMiddleware(authService, cfg)
 
 	return db, authMiddleware, authService, cfg

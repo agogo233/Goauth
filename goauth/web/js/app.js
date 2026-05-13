@@ -10,8 +10,12 @@ function app() {
     clients: [],
     invitations: [],
     proxyAuths: [],
+    auditLogs: [],
     adminTab: 'users',
     inviteToken: null,
+    userOffset: 0,
+    userLimit: 20,
+    userTotal: 0,
 
     // Modal states
     showTotpModal: false,
@@ -60,6 +64,7 @@ function app() {
       scopes: 'openid profile email',
       trusted: false
     },
+    editingClientId: '',
 
     inviteForm: {
       email: '',
@@ -360,15 +365,29 @@ function app() {
     },
 
     // 用户管理
-    async loadUsers() {
+    async loadUsers(offset) {
+      if (offset !== undefined) this.userOffset = offset;
       try {
-        const res = await this.api('GET', '/api/admin/users');
+        const res = await this.api('GET', `/api/admin/users?limit=${this.userLimit}&offset=${this.userOffset}`);
         if (res.ok) {
           const data = await res.json();
           this.users = data.users || data;
+          this.userTotal = data.total || this.users.length;
         }
       } catch (e) {
         console.error('Failed to load users:', e);
+      }
+    },
+
+    prevPage() {
+      if (this.userOffset >= this.userLimit) {
+        this.loadUsers(this.userOffset - this.userLimit);
+      }
+    },
+
+    nextPage() {
+      if (this.userOffset + this.userLimit < this.userTotal) {
+        this.loadUsers(this.userOffset + this.userLimit);
       }
     },
 
@@ -574,7 +593,28 @@ function app() {
       }
     },
 
-    async createClient() {
+    openNewClientModal() {
+      this.editingClientId = '';
+      this.clientForm = { id: '', secret: '', name: '', redirectUris: '', scopes: 'openid profile email', trusted: false };
+      this.error = '';
+      this.showClientModal = true;
+    },
+
+    openEditClientModal(client) {
+      this.editingClientId = client.id;
+      this.clientForm = {
+        id: client.id,
+        secret: '',
+        name: client.name || '',
+        redirectUris: (client.redirectUris || []).join('\n'),
+        scopes: (client.scopes || []).join(', '),
+        trusted: client.trusted
+      };
+      this.error = '';
+      this.showClientModal = true;
+    },
+
+    async saveClient() {
       this.error = '';
       this.loading = true;
 
@@ -582,25 +622,35 @@ function app() {
         const redirectUris = this.clientForm.redirectUris.split('\n').map(u => u.trim()).filter(u => u);
         const scopes = this.clientForm.scopes.split(',').map(s => s.trim()).filter(s => s);
 
-        const res = await this.api('POST', '/api/admin/clients', {
-          id: this.clientForm.id,
-          secret: this.clientForm.secret || undefined,
+        const body = {
           name: this.clientForm.name,
           redirectUris,
           scopes,
           trusted: this.clientForm.trusted
-        });
+        };
 
-        if (res.ok) {
-          this.showClientModal = false;
-          this.clientForm = { id: '', secret: '', name: '', redirectUris: '', scopes: 'openid profile email', trusted: false };
-          await this.loadClients();
+        if (this.editingClientId) {
+          const res = await this.api('PATCH', `/api/admin/clients/${this.editingClientId}`, body);
+          if (!res.ok) {
+            const data = await res.json();
+            throw new Error(data.error || '更新失败');
+          }
         } else {
-          const data = await res.json();
-          this.error = data.error || '创建失败';
+          body.id = this.clientForm.id;
+          body.secret = this.clientForm.secret || undefined;
+          const res = await this.api('POST', '/api/admin/clients', body);
+          if (!res.ok) {
+            const data = await res.json();
+            throw new Error(data.error || '创建失败');
+          }
         }
+
+        this.showClientModal = false;
+        this.clientForm = { id: '', secret: '', name: '', redirectUris: '', scopes: 'openid profile email', trusted: false };
+        this.editingClientId = '';
+        await this.loadClients();
       } catch (e) {
-        this.error = '网络错误';
+        this.error = e.message;
       } finally {
         this.loading = false;
       }
@@ -730,6 +780,18 @@ function app() {
         }
       } catch (e) {
         alert('网络错误');
+      }
+    },
+
+    // 审计日志
+    async loadAuditLogs() {
+      try {
+        const res = await this.api('GET', '/api/admin/audit-logs?limit=50');
+        if (res.ok) {
+          this.auditLogs = await res.json();
+        }
+      } catch (e) {
+        console.error('Failed to load audit logs:', e);
       }
     },
 

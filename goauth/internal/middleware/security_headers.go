@@ -1,37 +1,43 @@
 package middleware
 
 import (
+	"crypto/rand"
+	"encoding/base64"
+	"fmt"
+
 	"github.com/gin-gonic/gin"
 )
 
+// CSPNonceKey 用于在 gin.Context 中存储 CSP nonce
+const CSPNonceKey = "cspNonce"
+
+// generateNonce 生成随机 CSP nonce
+func generateNonce() string {
+	b := make([]byte, 16)
+	rand.Read(b)
+	return base64.StdEncoding.EncodeToString(b)
+}
+
 // SecurityHeaders 安全响应头中间件
-// 添加标准安全响应头以防护常见攻击
 func SecurityHeaders() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// 防止 MIME 类型嗅探
+		nonce := generateNonce()
+		c.Set(CSPNonceKey, nonce)
+
 		c.Header("X-Content-Type-Options", "nosniff")
-
-		// 防止点击劫持
 		c.Header("X-Frame-Options", "DENY")
-
-		// 引用策略
 		c.Header("Referrer-Policy", "strict-origin-when-cross-origin")
-
-		// 权限策略（替代 Feature-Policy）
 		c.Header("Permissions-Policy", "geolocation=(), microphone=(), camera=()")
+		c.Header("Strict-Transport-Security", "max-age=31536000; includeSubDomains; preload")
 
-		// HSTS - 强制 HTTPS，一年有效期
-		c.Header("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
-
-		// 隔离模式：阻止其他源加载你的资源，也阻止你的资源被其他源加载
 		c.Header("Cross-Origin-Embedder-Policy", "require-corp")
 		c.Header("Cross-Origin-Opener-Policy", "same-origin")
 
-		// Content-Security-Policy
-		// 注意：由于使用 Alpine.js 内联脚本和内联样式，需要 'unsafe-inline'
-		// Alpine.js 压缩版需要 'unsafe-eval' 来执行模板表达式 (x-bind, x-on 等)
-		// 生产环境可考虑使用 nonce 或 hash 替代
-		c.Header("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'")
+		csp := fmt.Sprintf(
+			"default-src 'self'; script-src 'self' 'nonce-%s' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'",
+			nonce,
+		)
+		c.Header("Content-Security-Policy", csp)
 
 		c.Next()
 	}

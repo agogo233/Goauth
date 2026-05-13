@@ -400,7 +400,8 @@ func TestCLI_HealthCheck(t *testing.T) {
 func TestCLI_Util_GenerateRandomPassword(t *testing.T) {
 	// 生成多个随机密码并验证
 	for i := 0; i < 10; i++ {
-		password := util.GenerateRandomPassword(16)
+		password, err := util.GenerateRandomPassword(16)
+		require.NoError(t, err, "生成随机密码不应该出错")
 		assert.Len(t, password, 16, "密码长度应该为 16")
 
 		// 验证密码只包含允许的字符

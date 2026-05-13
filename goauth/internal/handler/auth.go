@@ -121,8 +121,9 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 
-	// 记录审计日志
-	_ = h.auditService.LogLogin(c.Request.Context(), resp.User.ID, ip, true)
+	if resp.User != nil {
+		_ = h.auditService.LogLogin(c.Request.Context(), resp.User.ID, ip, true)
+	}
 
 	// 设置 cookie
 	maxAge := int(time.Until(resp.ExpiresAt).Seconds())
@@ -235,6 +236,8 @@ func (h *AuthHandler) Register(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "邮箱格式无效"})
 		case service.ErrUsernameEmpty:
 			c.JSON(http.StatusBadRequest, gin.H{"error": "用户名不能为空"})
+		case service.ErrInviteInvalid:
+			c.JSON(http.StatusBadRequest, gin.H{"error": "邀请链接无效或已过期"})
 		case repo.ErrUserExists:
 			c.JSON(http.StatusConflict, gin.H{"error": "用户名已存在"})
 		default:
@@ -249,70 +252,4 @@ func (h *AuthHandler) Register(c *gin.Context) {
 	c.JSON(http.StatusCreated, resp)
 }
 
-// GetMe 获取当前用户信息
-func (h *AuthHandler) GetMe(c *gin.Context) {
-	userID, exists := c.Get("userID")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "未登录"})
-		return
-	}
 
-	user, err := h.userService.GetByID(c.Request.Context(), userID.(string))
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "获取用户信息失败"})
-		return
-	}
-
-	c.JSON(http.StatusOK, user)
-}
-
-// UpdateProfile 更新资料
-func (h *AuthHandler) UpdateProfile(c *gin.Context) {
-	userID, _ := c.Get("userID")
-
-	var req struct {
-		Name  *string `json:"name"`
-		Email *string `json:"email"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的请求"})
-		return
-	}
-
-	user, err := h.userService.UpdateProfile(c.Request.Context(), userID.(string), req.Name, req.Email)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "更新失败"})
-		return
-	}
-
-	c.JSON(http.StatusOK, user)
-}
-
-// UpdatePassword 更新密码
-func (h *AuthHandler) UpdatePassword(c *gin.Context) {
-	userID, _ := c.Get("userID")
-
-	var req struct {
-		OldPassword string `json:"oldPassword" binding:"required"`
-		NewPassword string `json:"newPassword" binding:"required"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的请求"})
-		return
-	}
-
-	err := h.userService.UpdatePassword(c.Request.Context(), userID.(string), req.OldPassword, req.NewPassword)
-	if err != nil {
-		switch err {
-		case util.ErrPasswordTooShort:
-			c.JSON(http.StatusBadRequest, gin.H{"error": "密码太短"})
-		case util.ErrPasswordTooWeak:
-			c.JSON(http.StatusBadRequest, gin.H{"error": "密码强度不足"})
-		default:
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		}
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{"message": "密码已更新"})
-}

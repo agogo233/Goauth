@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -154,11 +155,11 @@ func runServe(cmd *cobra.Command, args []string) {
 	// Setup services
 	protector := util.NewBruteForceProtector(database.DB, cfg.Security.LoginMaxAttempts, cfg.Security.LoginBlockDuration)
 	totpService := service.NewTotpService(database.DB, cfg)
-	authService := service.NewAuthService(userRepo, sessionRepo, groupRepo, totpService, protector, cfg)
+	invitationService := service.NewInvitationService(invitationRepo, groupRepo, database.DB)
+	authService := service.NewAuthService(userRepo, sessionRepo, groupRepo, totpService, invitationService, protector, cfg)
 	userService := service.NewUserService(userRepo, sessionRepo, groupRepo, database.DB, cfg)
 	groupService := service.NewGroupService(groupRepo, database.DB)
 	auditService := service.NewAuditService(database.DB)
-	invitationService := service.NewInvitationService(invitationRepo, groupRepo, database.DB)
 
 	// Setup handlers
 	healthHandler := handler.NewHealthHandler()
@@ -427,12 +428,24 @@ func setupRouter(
 	router.Static("/css", "./web/css")
 	router.Static("/js", "./web/js")
 	router.Static("/assets", "./web/assets")
-	router.StaticFile("/", "./web/index.html")
 
-	// Invite link - return index.html, frontend handles the token
-	router.GET("/invite/:token", func(c *gin.Context) {
-		c.File("./web/index.html")
-	})
+	// Inject nonce into index.html for CSP
+	injectNonce := func(c *gin.Context) {
+		nonceVal, exists := c.Get(middleware.CSPNonceKey)
+		nonce := ""
+		if exists {
+			nonce, _ = nonceVal.(string)
+		}
+		indexHTML, err := os.ReadFile("./web/index.html")
+		if err != nil {
+			c.String(http.StatusInternalServerError, "Internal Server Error")
+			return
+		}
+		content := strings.ReplaceAll(string(indexHTML), "__CSP_NONCE__", nonce)
+		c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(content))
+	}
+	router.GET("/", injectNonce)
+	router.GET("/invite/:token", injectNonce)
 
 	// API routes
 	api := router.Group("/api")

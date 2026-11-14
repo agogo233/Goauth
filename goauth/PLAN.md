@@ -610,7 +610,7 @@ logging:
 - Session存储在SQLite独立表
 - 支持多设备登录
 - 普通登录 Session TTL 可配置（默认24小时），"记住我" Session TTL 可配置（默认30天）
-- OIDC Session TTL 可配置（默认90天）
+- OIDC Session TTL 可配置（默认30天，自 2026-11 安全基线起从 90 天缩短）
 - 登录后的每次请求会滑动续期 Session
 - 登出时主动删除Session
 

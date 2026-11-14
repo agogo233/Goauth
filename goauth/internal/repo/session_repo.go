@@ -9,6 +9,7 @@ import (
 	"github.com/jmoiron/sqlx"
 
 	"goauth/internal/model"
+	"goauth/internal/util"
 )
 
 var ErrSessionNotFound = errors.New("session not found")
@@ -31,7 +32,7 @@ func (r *SessionRepo) Create(ctx context.Context, session *model.Session) error 
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO sessions (id, userId, token, amr, rememberMe, expiresAt, createdAt)
 		VALUES (?, ?, ?, ?, ?, ?, ?)
-	`, session.ID, session.UserID, session.Token, session.AMR, session.RememberMe, session.ExpiresAt, session.CreatedAt)
+	`, session.ID, session.UserID, util.HashToken(session.Token), session.AMR, session.RememberMe, session.ExpiresAt, session.CreatedAt)
 
 	return err
 }
@@ -39,7 +40,7 @@ func (r *SessionRepo) Create(ctx context.Context, session *model.Session) error 
 // FindByToken 根据 Token 查找 Session
 func (r *SessionRepo) FindByToken(ctx context.Context, token string) (*model.Session, error) {
 	var session model.Session
-	err := r.db.GetContext(ctx, &session, `SELECT * FROM sessions WHERE token = ?`, token)
+	err := r.db.GetContext(ctx, &session, `SELECT * FROM sessions WHERE token = ?`, util.HashToken(token))
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrSessionNotFound
@@ -50,6 +51,9 @@ func (r *SessionRepo) FindByToken(ctx context.Context, token string) (*model.Ses
 }
 
 // FindByID 根据 ID 查找 Session
+// FindByID 根据 ID 查找 Session
+// 注意：token 字段存储的是 SHA-256 哈希，此处返回哈希值；
+// 需要原始 token 时请使用 FindByToken
 func (r *SessionRepo) FindByID(ctx context.Context, id string) (*model.Session, error) {
 	var session model.Session
 	err := r.db.GetContext(ctx, &session, `SELECT * FROM sessions WHERE id = ?`, id)
@@ -77,7 +81,7 @@ func (r *SessionRepo) Delete(ctx context.Context, id string) error {
 
 // DeleteByToken 根据 Token 删除 Session
 func (r *SessionRepo) DeleteByToken(ctx context.Context, token string) error {
-	_, err := r.db.ExecContext(ctx, `DELETE FROM sessions WHERE token = ?`, token)
+	_, err := r.db.ExecContext(ctx, `DELETE FROM sessions WHERE token = ?`, util.HashToken(token))
 	return err
 }
 

@@ -2,14 +2,12 @@ package integration
 
 import (
 	"context"
-	"encoding/json"
 	"testing"
 	"time"
 
 	"github.com/go-jose/go-jose/v4"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"golang.org/x/crypto/bcrypt"
 	zitadeloidc "github.com/zitadel/oidc/v3/pkg/oidc"
 
 	"goauth/internal/model"
@@ -32,10 +30,11 @@ func TestOIDC_Discovery(t *testing.T) {
 	storage := provider.Storage()
 	require.NotNil(t, storage)
 
-	// 验证签名密钥可以获取
+	// 验证签名密钥可以获取；ID 应为非空（来自 DB 记录 ID）
 	signingKey, err := storage.SigningKey(context.Background())
 	require.NoError(t, err)
-	assert.Equal(t, "key-1", signingKey.ID())
+	assert.NotEmpty(t, signingKey.ID())
+	assert.Equal(t, signingKey.ID(), storage.SigningKeyIDForTest())
 }
 
 func TestOIDC_JWKS(t *testing.T) {
@@ -50,9 +49,9 @@ func TestOIDC_JWKS(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, keySet, 1)
 
-	// 验证密钥属性
+	// 验证密钥属性（kid 来自 DB 记录 ID，非硬编码）
 	key := keySet[0]
-	assert.Equal(t, "key-1", key.ID())
+	assert.NotEmpty(t, key.ID())
 	assert.Equal(t, "sig", key.Use())
 }
 
@@ -65,24 +64,14 @@ func TestOIDC_ClientValidation(t *testing.T) {
 	// 创建 OIDC Provider
 	storage := createTestStorage(t, server)
 
-	// 创建测试客户端 - 使用 Storage 内部的 Client 类型
-	client := &oidc.Client{
-		ID_:           "test-client",
-		Secret_:       hashPassword("test-secret"),
-		Name_:         "Test Client",
-		RedirectURIs_: []string{"http://localhost:3000/callback"},
-		Scopes_:       []string{"openid", "profile", "email"},
-	}
-
-	clientJSON, _ := json.Marshal(client)
-
-	clientPayload := &model.OIDCPayload{
-		ID:      "test-client",
-		Type:    "client",
-		Payload: string(clientJSON),
-	}
-	err := server.OIDCRepo.Create(context.Background(), clientPayload)
-	require.NoError(t, err)
+	// 通过 clients 表创建测试客户端（repo.Create 会自动 bcrypt 哈希 Secret，这里传明文）
+	server.CreateClient(t,
+		helper.WithClientID("test-client"),
+		helper.WithClientSecret("test-secret"),
+		helper.WithClientName("Test Client"),
+		helper.WithRedirectURIs([]string{"http://localhost:3000/callback"}),
+		helper.WithScopes([]string{"openid", "profile", "email"}),
+	)
 
 	// 验证客户端可以被获取
 	foundClient, err := storage.GetClientByClientID(context.Background(), "test-client")
@@ -97,27 +86,18 @@ func TestOIDC_ClientSecretValidation(t *testing.T) {
 	// 创建 OIDC Provider
 	storage := createTestStorage(t, server)
 
-	// 创建测试客户端（带密钥）
-	client := &oidc.Client{
-		ID_:           "secret-client",
-		Secret_:       hashPassword("client-secret-123"),
-		Name_:         "Secret Client",
-		RedirectURIs_: []string{"http://localhost:3000/callback"},
-		Scopes_:       []string{"openid", "profile"},
-	}
-
-	clientJSON, _ := json.Marshal(client)
-
-	clientPayload := &model.OIDCPayload{
-		ID:      "secret-client",
-		Type:    "client",
-		Payload: string(clientJSON),
-	}
-	err := server.OIDCRepo.Create(context.Background(), clientPayload)
-	require.NoError(t, err)
+	// 通过 clients 表创建测试客户端（带密钥）
+	// 注意：repo.Create 会对 Secret 做 bcrypt 哈希，这里传明文
+	server.CreateClient(t,
+		helper.WithClientID("secret-client"),
+		helper.WithClientSecret("client-secret-123"),
+		helper.WithClientName("Secret Client"),
+		helper.WithRedirectURIs([]string{"http://localhost:3000/callback"}),
+		helper.WithScopes([]string{"openid", "profile"}),
+	)
 
 	// 验证正确的密钥
-	err = storage.AuthorizeClientIDSecret(context.Background(), "secret-client", "client-secret-123")
+	err := storage.AuthorizeClientIDSecret(context.Background(), "secret-client", "client-secret-123")
 	assert.NoError(t, err)
 
 	// 验证错误的密钥
@@ -407,14 +387,6 @@ func createTestOIDCProvider(t *testing.T, server *helper.TestServer) *oidc.Provi
 	return provider
 }
 
-func hashPassword(password string) string {
-	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
-	if err != nil {
-		panic(err)
-	}
-	return string(hash)
-}
-
 // ========== OIDC 授权码测试 ==========
 
 func TestOIDC_SaveAuthCode(t *testing.T) {
@@ -588,26 +560,17 @@ func TestOIDC_ClientMethods(t *testing.T) {
 	server := helper.NewTestServer(t)
 	defer server.Close()
 
-	// 创建测试客户端
-	client := &oidc.Client{
-		ID_:           "method-test-client",
-		Secret_:       hashPassword("secret"),
-		Name_:         "Method Test Client",
-		RedirectURIs_: []string{"http://localhost:3000/callback", "http://localhost:3000/callback2"},
-		PostLogoutRedirectURIs_: []string{"http://localhost:3000/logout"},
-		Scopes_:       []string{"openid", "profile", "email"},
-		Trusted_:      true,
-		SkipConsent_:  true,
-	}
-
-	clientJSON, _ := json.Marshal(client)
-	clientPayload := &model.OIDCPayload{
-		ID:      "method-test-client",
-		Type:    "client",
-		Payload: string(clientJSON),
-	}
-	err := server.OIDCRepo.Create(context.Background(), clientPayload)
-	require.NoError(t, err)
+	// 通过 clients 表创建测试客户端
+	// 注意：repo.Create 会对 Secret 做 bcrypt 哈希，这里传明文
+	server.CreateClient(t,
+		helper.WithClientID("method-test-client"),
+		helper.WithClientSecret("secret"),
+		helper.WithClientName("Method Test Client"),
+		helper.WithRedirectURIs([]string{"http://localhost:3000/callback", "http://localhost:3000/callback2"}),
+		helper.WithPostLogoutURIs([]string{"http://localhost:3000/logout"}),
+		helper.WithScopes([]string{"openid", "profile", "email"}),
+		helper.WithTrusted(true),
+	)
 
 	// 验证客户端方法
 	storage := createTestStorage(t, server)
@@ -644,26 +607,16 @@ func TestOIDC_ClientSecretValidation_EmptySecret(t *testing.T) {
 
 	storage := createTestStorage(t, server)
 
-	// 创建无密钥的客户端
-	client := &oidc.Client{
-		ID_:           "no-secret-client",
-		Secret_:       "", // 空密钥
-		Name_:         "No Secret Client",
-		RedirectURIs_: []string{"http://localhost:3000/callback"},
-		Scopes_:       []string{"openid"},
-	}
-
-	clientJSON, _ := json.Marshal(client)
-	clientPayload := &model.OIDCPayload{
-		ID:      "no-secret-client",
-		Type:    "client",
-		Payload: string(clientJSON),
-	}
-	err := server.OIDCRepo.Create(context.Background(), clientPayload)
-	require.NoError(t, err)
+	// 创建无密钥的客户端（通过 clients 表）
+	server.CreateClient(t,
+		helper.WithClientID("no-secret-client"),
+		helper.WithClientName("No Secret Client"),
+		helper.WithRedirectURIs([]string{"http://localhost:3000/callback"}),
+		helper.WithScopes([]string{"openid"}),
+	)
 
 	// 验证空密钥客户端
-	err = storage.AuthorizeClientIDSecret(context.Background(), "no-secret-client", "any-secret")
+	err := storage.AuthorizeClientIDSecret(context.Background(), "no-secret-client", "any-secret")
 	assert.Error(t, err) // 空密钥客户端不应该能验证
 }
 
@@ -837,9 +790,9 @@ func TestOIDC_KeySet(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, keySet, 1)
 
-	// 验证密钥属性
+	// 验证密钥属性（kid 来自 DB 记录 ID，非硬编码）
 	key := keySet[0]
-	assert.Equal(t, "key-1", key.ID())
+	assert.NotEmpty(t, key.ID())
 	assert.Equal(t, "sig", key.Use())
 	assert.Equal(t, jose.SignatureAlgorithm("RS256"), key.Algorithm())
 }

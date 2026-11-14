@@ -10,44 +10,41 @@ ProxyAuth 域名通过反向代理与 Goauth 协作来保护应用。当用户�
 
 ## 识别用户
 
-ProxyAuth 可以通过以下三种方法识别尝试访问受保护域名的用户，按顺序尝试：
+ProxyAuth 可以通过以下两种方法识别尝试访问受保护域名的用户，按顺序尝试：
 
-1. 检查 `x-goauth-session` 中的有效用户会话 Cookie。这是用户通过浏览器发起请求时最常见的识别方式。
-2. 检查 `Proxy-Authorization` 头是否使用 Basic Auth，如果是，则根据头中的用户名和密码识别用户。如果设置了该头但未找到用户，则返回 407 状态码并设置 Proxy-Authenticate 响应头。
-3. 检查 `Authorization` 头是否使用 Basic Auth，如果是，则根据头中的用户名和密码识别用户。如果设置了该头但未找到用户，则返回 401 状态码并设置 WWW-Authenticate 响应头。
+1. 检查 `session` Cookie 中的有效用户会话。这是用户通过浏览器发起请求时最常见的识别方式。
+2. 检查 `Authorization` 头是否使用 Bearer Token，如果是，则根据 Token 对应的有效会话识别用户。
+
+未识别到用户时返回 `401`。
 
 ## 授权
 
 > [!CAUTION]
 > 如果 ProxyAuth 域名未分配任何安全组，则**任何已登录用户**都可以访问该域名。
 
-当用户访问受保护的域名时，系统将从**最具体**到**最不具体**匹配第一个 ProxyAuth 域名来检查访问权限。在下面的示例中，只有 **[users]** 组的用户无法访问 `app.example.com/admin/user_accounts`，但可以访问 `app.example.com/home`。同样，他们也无法访问 `secret.example.com`，该域名会被 `*.example.com/*` 匹配，只允许 `admin` 组的用户访问。
-
-<p align=center>
-<img align=center src="/public/screenshots/proxy-authz.png" width="800" alt="ProxyAuth 授权规则示例" />
-</p>
-
-创建 ProxyAuth 域名时，尾部的 `/` 和 `.` 等分隔符**会被检查**。访问 `*.example.com` 的权限不包括 `example.com`，它们需要分别添加。
+`/authz/forward-auth` 端点会检查用户是否有权访问目标域名。目标域名取自 `?domain=` 查询参数，未提供时取请求的 `Host` 头。域名匹配为**精确匹配**：通配符域名暂不支持，`app.example.com` 与 `app.example.com/` 也被视为不同条目，需要分别添加。
 
 > [!IMPORTANT]
-> 你可以设置通配符 ProxyAuth 域名 `*/*`，它将覆盖 ProxyAuth 域名设置中其他条目未匹配的任何域名。
+> `/authz/auth-request` 端点目前仅验证登录状态，**不执行**域名级授权检查。需要按域名控制访问权限时，请使用 `/authz/forward-auth`。
+
+> [!TIP]
+> 反向代理通常会把 `Host` 头改写为 Goauth 自身地址，此时按 `Host` 匹配会落空（未匹配到配置时默认放行所有已登录用户）。如需严格执行域名授权，请在转发时显式携带 `?domain=` 参数。
 
 ## 响应
 
-当用户被识别并确认有权访问请求的资源时，将发送 `200` 成功响应。
+* 当用户被识别且有权访问请求的资源时，发送 `200` 成功响应，并附带用户信息响应头（见下节）。
+* 当用户未被识别或会话无效时，发送 `401` 响应码。
+* 当用户已登录但**拒绝**访问（不在所需安全组、未通过 MFA 要求或超过最大会话时长）时，发送 `403` Forbidden 响应码。
 
-在所有拒绝的请求中，响应会添加一个 `Location` 头，指向 Goauth 登录页面的位置。
-
-* 当用户未被识别时，根据使用的授权端点和识别方法，将发送 `401`、`407` 或 `302` 响应码。
-* 当用户被找到但**拒绝**访问时，将发送 `403` Forbidden 响应码。
-
-## 可信头单点登录
+## 用户信息响应头
 
 如果请求被允许，响应中将设置以下头信息。这可在某些自托管应用上启用可信头 SSO：
-* `Remote-User` = `username`
-* `Remote-Email` = `email`
-* `Remote-Name` = `name`
-* `Remote-Groups` = `groups`，以逗号分隔的列表，例如 `users,admins,owners`
+* `X-User-Id` = 用户 ID
+* `X-User-Name` = `username`
+* `X-User-Email` = `email`（如有）
+
+> [!NOTE]
+> 当前响应头不包含用户组信息。如需向应用传递用户组，请使用 OIDC 的 `groups` scope。
 
 ## 反向代理设置
 
@@ -55,8 +52,8 @@ Goauth 暴露两个代理认证端点，使用哪个取决于你的反向代理�
 
 | 端点                    | 反向代理      |
 | ------------------------| ------------- |
-| /api/authz/forward-auth | [Caddy](https://caddyserver.com/docs/caddyfile/directives/forward_auth), [Traefik](https://doc.traefik.io/traefik/middlewares/http/forwardauth/)  |
-| /api/authz/auth-request | [NGINX](https://nginx.org/en/docs/http/ngx_http_auth_request_module.html) |
+| /authz/forward-auth | [Caddy](https://caddyserver.com/docs/caddyfile/directives/forward_auth), [Traefik](https://doc.traefik.io/traefik/middlewares/http/forwardauth/)  |
+| /authz/auth-request | [NGINX](https://nginx.org/en/docs/http/ngx_http_auth_request_module.html) |
 
 这些端点基本相同，但 NGINX 的限制使得需要单独的端点。
 
@@ -85,8 +82,8 @@ auth.example.com {
 # 托管受保护的应用
 app.example.com {
   forward_auth goauth:3000 {
-    uri /api/authz/forward-auth
-    copy_headers Remote-User Remote-Groups Remote-Name Remote-Email
+    uri /authz/forward-auth
+    copy_headers X-User-Id X-User-Name X-User-Email
   }
 
   reverse_proxy app:8080
@@ -115,7 +112,7 @@ proxy_set_header Connection "upgrade";
 
 `auth-location.conf`
 ``` conf
-location /api/authz/auth-request {
+location /authz/auth-request {
   internal;
 
   include /config/nginx/snippets/proxy.conf;
@@ -125,25 +122,18 @@ location /api/authz/auth-request {
   proxy_set_header Connection "";
   proxy_pass_request_body off;
 
-  # 发送 auth_request 的 URL。应为 ${APP_URL}/api/authz/auth-request
-  proxy_pass http://goauth:3000/api/authz/auth-request;
+  # 发送 auth_request 的 URL。应为 ${APP_URL}/authz/auth-request
+  proxy_pass http://goauth:3000/authz/auth-request;
 }
 ```
 
 `proxy-auth.conf`
 ``` conf
-auth_request /api/authz/auth-request;
+auth_request /authz/auth-request;
 
-proxy_set_header Remote-User $upstream_http_remote_user;
-proxy_set_header Remote-Groups $upstream_http_remote_groups;
-proxy_set_header Remote-Email $upstream_http_remote_email;
-proxy_set_header Remote-Name $upstream_http_remote_name;
-
-# 如果响应为 401 或 407 状态码，尝试像 302 一样重定向到 Location 头
-# NGINX auth_request 只能处理 2xx 和 4xx 状态码，这是变通方案
-auth_request_set $redirection_url $upstream_http_location;
-error_page 401 =302 $redirection_url;
-error_page 407 =302 $redirection_url;
+proxy_set_header X-User-Id $upstream_http_x_user_id;
+proxy_set_header X-User-Name $upstream_http_x_user_name;
+proxy_set_header X-User-Email $upstream_http_x_user_email;
 ```
 
 ### NGINX
@@ -217,7 +207,6 @@ http {
 
 1. 访问 `Proxy Hosts` 页面并 `Add a Proxy Host`
 2. 填写 `Details` 标签页
-    * <img src="/public/screenshots/npm-goauth-details.png" width="500" alt="NPM Goauth 详情配置" />
 3. 在 `SSL` 标签页填写 SSL 配置
 4. 在 `Advanced` 标签页填写；这是为了包含 `proxy.conf` 配置片段，之后添加任何受保护应用也需要这样做
     ``` conf
@@ -226,13 +215,11 @@ http {
       proxy_pass $forward_scheme://$server:$port;
     }
     ```
-    * <img src="/public/screenshots/npm-goauth-advanced.png" width="500" alt="NPM Goauth 高级配置" />
 
 #### 托管受保护的应用：
 
 1. 访问 `Proxy Hosts` 页面并 `Add a Proxy Host`
 2. 填写 `Details` 标签页
-    * <img src="/public/screenshots/npm-app-details.png" width="500" alt="NPM 应用详情配置" />
 3. 在 `SSL` 标签页填写 SSL 配置
 4. 在 `Advanced` 标签页填写；此配置将包含指示 NGINX 使用 Goauth 进行 ProxyAuth 的配置片段
     ``` conf
@@ -247,7 +234,6 @@ http {
       proxy_pass $forward_scheme://$server:$port;
     }
     ```
-    * <img src="/public/screenshots/npm-app-advanced.png" width="500" alt="NPM 应用高级配置" />
 
 > [!WARNING]
 > 如果受保护的应用需要 websockets，请确保在 `Advanced` 标签页中取消包含 `websockets.conf` 配置片段的那行注释。
@@ -307,7 +293,7 @@ services:
       - goauth
 
   goauth:
-    image: goauth/goauth:latest
+    image: ghcr.io/aoten/goauth:latest
     volumes:
       - goauth-data:/app/data
     environment:
@@ -323,9 +309,9 @@ services:
       traefik.http.routers.goauth.rule: 'Host(`auth.example.com`)'
       traefik.http.routers.goauth.entryPoints: 'websecure'
       traefik.http.routers.goauth.tls: 'true'
-      traefik.http.middlewares.goauth.forwardAuth.address: 'http://goauth:3000/api/authz/forward-auth'
+      traefik.http.middlewares.goauth.forwardAuth.address: 'http://goauth:3000/authz/forward-auth'
       traefik.http.middlewares.goauth.forwardAuth.trustForwardHeader: 'true'
-      traefik.http.middlewares.goauth.forwardAuth.authResponseHeaders: 'Remote-User,Remote-Name,Remote-Email,Remote-Groups'
+      traefik.http.middlewares.goauth.forwardAuth.authResponseHeaders: 'X-User-Id,X-User-Name,X-User-Email'
 
   whoami:
     container_name: whoami

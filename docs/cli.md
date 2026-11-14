@@ -32,7 +32,7 @@ goauth reset-password -u <username>
 goauth create-admin -u <username> -p <password>
 ```
 
-创建一个新的管理员用户，使用指定的用户名和密码。该用户将自动添加到 `auth_admins` 组。
+创建一个新的管理员用户，使用指定的用户名和密码。该用户将拥有管理员权限（`isAdmin` 标识），可访问管理后台的全部功能。
 
 ## 查看版本
 

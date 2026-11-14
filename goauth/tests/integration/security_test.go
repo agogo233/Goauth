@@ -5,13 +5,16 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"goauth/internal/middleware"
 	"goauth/internal/service"
 	"goauth/tests/helper"
 )
@@ -302,30 +305,29 @@ func TestSecurity_Session_ExpiredToken(t *testing.T) {
 	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
 }
 
-// TestSecurity_CSRF_NoToken 验证 CSRF 保护（如果实现）
+// TestSecurity_CSRF_NoToken 验证 CSRF 中间件对登出接口的保护
 func TestSecurity_CSRF_NoToken(t *testing.T) {
-	server := helper.NewTestServer(t)
-	defer server.Close()
-
-	// 创建用户并登录
-	_, token := server.LoginAsUser(t, helper.WithUsername("csrftest"))
-
-	// 尝试不带任何 CSRF 保护执行敏感操作
-	// 注意：这个测试验证的是当前行为，实际 CSRF 保护取决于实现
-	req, err := http.NewRequest("POST", server.Server.URL+"/api/auth/logout", nil)
-	require.NoError(t, err)
-	req.AddCookie(&http.Cookie{
-		Name:  "session",
-		Value: token,
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.Use(middleware.CSRF(middleware.CSRFConfig{}))
+	router.POST("/api/auth/logout", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"message": "已登出"})
 	})
 
-	client := &http.Client{}
-	resp, err := client.Do(req)
-	require.NoError(t, err)
-	defer resp.Body.Close()
+	// 不带 CSRF token 的登出请求应被拒绝（403）
+	req := httptest.NewRequest("POST", "/api/auth/logout", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusForbidden, w.Code)
 
-	// 登出应该成功（或根据 CSRF 实现返回相应状态码）
-	assert.True(t, resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusForbidden)
+	// 携带匹配的 CSRF token 应成功
+	csrfToken := "test-csrf-token-value"
+	req = httptest.NewRequest("POST", "/api/auth/logout", nil)
+	req.AddCookie(&http.Cookie{Name: "csrf_token", Value: csrfToken})
+	req.Header.Set("X-CSRF-Token", csrfToken)
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
 }
 
 // TestSecurity_AdminAccess_RegularUser 验证普通用户无法访问管理端点
@@ -465,6 +467,7 @@ func TestSecurity_SessionConcurrentLogin(t *testing.T) {
 
 	var result1 service.LoginResponse
 	require.NoError(t, json.Unmarshal(body1, &result1))
+	_ = result1 // token 已不再通过 JSON 下发，改用 cookie 断言
 
 	// 第二次登录
 	resp2, err := http.Post(
@@ -484,9 +487,9 @@ func TestSecurity_SessionConcurrentLogin(t *testing.T) {
 	assert.Equal(t, http.StatusOK, resp1.StatusCode)
 	assert.Equal(t, http.StatusOK, resp2.StatusCode)
 
-	// 两个 token 都应该有效
-	assert.NotEmpty(t, result1.Token)
-	assert.NotEmpty(t, result2.Token)
+	// 两次登录都应通过 HttpOnly cookie 下发 session（token 不再出现在响应体）
+	assert.NotEmpty(t, resp1.Cookies(), "第一次登录应下发 cookie")
+	assert.NotEmpty(t, resp2.Cookies(), "第二次登录应下发 cookie")
 }
 
 // TestSecurity_PasswordUpdate_RequiresAuth 验证修改密码需要认证

@@ -277,8 +277,8 @@ test.describe('用户删除', () => {
       return;
     }
 
-    const loginData = await loginResponse.json();
-    const newAdminSession = loginData.token;
+    // token 改为 HttpOnly cookie 下发，从 Set-Cookie 提取
+    const newAdminSession = loginResponse.headers().get("set-cookie")?.match(/session=([^;]+)/)?.[1] || "";
 
     // 使用新管理员的 session 尝试删除自己
     const deleteResponse = await request.delete(`/api/admin/users/${newUser.id}`, {

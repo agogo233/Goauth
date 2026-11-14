@@ -294,73 +294,29 @@ export const test = base.extend<{
 
 ### 5.1 GitHub Actions 工作流
 
+实际工作流文件为 `.github/workflows/e2e-test.yml`，在 `main`、`master`、`mod` 分支的 push/PR（路径包含 `goauth/**` 或工作流文件自身）时触发，包含以下 Job：
+
+| Job | 说明 |
+|-----|------|
+| build | 安装 Go 与 SQLite 编译依赖，`CGO_ENABLED=1` 编译二进制并上传 artifact |
+| unit-and-integration-tests | 运行 `go test ./internal/...` 与 `./tests/integration/...`（含 `-race` 与覆盖率），上传日志与覆盖率报告 |
+| e2e-tests | 下载二进制，Node.js + `npm ci`，安装 Playwright Chromium 后运行测试，上传 HTML/JSON 报告与输出日志 |
+| collect-logs-on-failure | 任一 Job 失败时归档数据库、日志等调试信息（保留 30 天） |
+| test-summary | 汇总各 Job 状态到 Step Summary，存在失败时使工作流失败 |
+
+关键版本与环境：
+
 ```yaml
-# .github/workflows/e2e-tests.yml
-name: E2E Tests
-
-on:
-  push:
-    branches: [main, develop]
-  pull_request:
-    branches: [main]
-
-jobs:
-  e2e-tests:
-    runs-on: ubuntu-latest
-    
-    strategy:
-      matrix:
-        node-version: [18.x]
-        browser: [chromium]
-    
-    steps:
-      - uses: actions/checkout@v3
-      
-      - name: Setup Go
-        uses: actions/setup-go@v4
-        with:
-          go-version: '1.21'
-      
-      - name: Setup Node.js
-        uses: actions/setup-node@v3
-        with:
-          node-version: ${{ matrix.node-version }}
-          cache: 'npm'
-          cache-dependency-path: goauth/tests/e2e/package-lock.json
-      
-      - name: Install dependencies
-        working-directory: goauth/tests/e2e
-        run: npm ci
-      
-      - name: Install Playwright browsers
-        working-directory: goauth/tests/e2e
-        run: npx playwright install --with-deps ${{ matrix.browser }}
-      
-      - name: Build Goauth
-        working-directory: goauth
-        run: make build
-      
-      - name: Run E2E tests
-        working-directory: goauth/tests/e2e
-        env:
-          CI: true
-          BASE_URL: http://localhost:3001
-        run: npx playwright test --project=${{ matrix.browser }}
-      
-      - name: Upload test results
-        if: always()
-        uses: actions/upload-artifact@v3
-        with:
-          name: test-results-${{ matrix.browser }}
-          path: goauth/tests/e2e/test-results/
-      
-      - name: Upload HTML report
-        if: always()
-        uses: actions/upload-artifact@v3
-        with:
-          name: html-report-${{ matrix.browser }}
-          path: goauth/tests/e2e/html-report/
+env:
+  GO_VERSION: '1.24'
+  NODE_VERSION: '20'
+  APP_PORT: 3000
 ```
+
+E2E Job 使用以下环境变量运行：`GOAUTH_BASE_URL=http://localhost:3000`、`CI=true`、`PORT=3000`。
+
+> [!NOTE]
+> CI 中直接使用预编译的二进制启动服务（`tests/e2e/playwright.config.ts` 的 `webServer`），无需在 E2E Job 中重复编译。
 
 ### 5.2 测试报告
 

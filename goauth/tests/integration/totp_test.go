@@ -216,7 +216,14 @@ func TestTotp_Login_FullFlow(t *testing.T) {
 	err = json.Unmarshal(body, &totpResult)
 	require.NoError(t, err)
 
-	assert.NotEmpty(t, totpResult.Token, "应该返回最终 session token")
+	// token 已改为 json:"-"，改从 Set-Cookie 提取最终 session
+	var finalToken string
+	for _, ck := range resp.Cookies() {
+		if ck.Name == "session" {
+			finalToken = ck.Value
+		}
+	}
+	assert.NotEmpty(t, finalToken, "应该通过 HttpOnly cookie 下发最终 session token")
 	assert.NotNil(t, totpResult.User, "应该返回用户信息")
 	assert.Equal(t, "totplogin", totpResult.User.Username)
 	assert.False(t, totpResult.RequireTotp, "TOTP 已验证，不应再要求")
@@ -429,10 +436,16 @@ func TestMfaRequired_UserLevel(t *testing.T) {
 	assert.Equal(t, http.StatusOK, resp.StatusCode, "登录应该成功，响应: %s", string(respBody))
 	assert.True(t, result["requireMfaSetup"].(bool), "应该返回 requireMfaSetup: true")
 	assert.NotNil(t, result["user"], "应该返回用户信息")
-	assert.NotEmpty(t, result["token"], "应该返回临时 token")
+	assert.Nil(t, result["token"], "token 不应出现在 JSON 响应体中")
 
-	// 验证用户可以访问 TOTP 设置 API
-	token := result["token"].(string)
+	// 从 HttpOnly cookie 提取临时 session
+	var token string
+	for _, ck := range resp.Cookies() {
+		if ck.Name == "session" {
+			token = ck.Value
+		}
+	}
+	require.NotEmpty(t, token, "应该通过 HttpOnly cookie 下发临时 session")
 	setupReq, _ := http.NewRequest("POST", server.Server.URL+"/api/mfa-setup/totp/setup", nil)
 	setupReq.AddCookie(&http.Cookie{Name: "session", Value: token})
 
@@ -513,7 +526,15 @@ func TestMfaRequired_CompleteSetup(t *testing.T) {
 
 	var result map[string]interface{}
 	json.Unmarshal(respBody, &result)
-	token := result["token"].(string)
+
+	// token 已改为 json:"-"，从 HttpOnly cookie 提取临时 session
+	var token string
+	for _, ck := range resp.Cookies() {
+		if ck.Name == "session" {
+			token = ck.Value
+		}
+	}
+	require.NotEmpty(t, token, "应该通过 HttpOnly cookie 下发临时 session")
 
 	// 设置 TOTP
 	client := &http.Client{}
@@ -588,7 +609,15 @@ func TestMfaRequired_DeniedWithoutTotpSetup(t *testing.T) {
 
 	var result map[string]interface{}
 	json.NewDecoder(resp.Body).Decode(&result)
-	token := result["token"].(string)
+
+	// token 已改为 json:"-"，从 HttpOnly cookie 提取临时 session
+	var token string
+	for _, ck := range resp.Cookies() {
+		if ck.Name == "session" {
+			token = ck.Value
+		}
+	}
+	require.NotEmpty(t, token, "应该通过 HttpOnly cookie 下发临时 session")
 
 	// 尝试访问需要完整认证的 API（如修改密码）
 	client := &http.Client{}
@@ -808,12 +837,19 @@ func TestTotp_SessionState_AfterTotpVerify(t *testing.T) {
 
 	var result service.LoginResponse
 	json.NewDecoder(resp.Body).Decode(&result)
+	_ = result
 
-	// 验证返回了新的 token
-	assert.NotEmpty(t, result.Token, "应该返回最终 session token")
+	// token 已改为 json:"-"，从 Set-Cookie 提取最终 session token
+	var finalToken string
+	for _, ck := range resp.Cookies() {
+		if ck.Name == "session" {
+			finalToken = ck.Value
+		}
+	}
+	require.NotEmpty(t, finalToken, "应该通过 HttpOnly cookie 下发最终 session token")
 
 	// 验证 session 的 AMR 是 pwd,totp
-	session, err := server.SessionRepo.FindByToken(context.Background(), result.Token)
+	session, err := server.SessionRepo.FindByToken(context.Background(), finalToken)
 	require.NoError(t, err)
 	assert.Equal(t, "pwd,totp", session.AMR, "session AMR 应该是 pwd,totp")
 }

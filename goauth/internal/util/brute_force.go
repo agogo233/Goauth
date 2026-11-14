@@ -11,17 +11,23 @@ import (
 
 // BruteForceProtector 暴力破解防护
 type BruteForceProtector struct {
-	db           *sqlx.DB
-	maxAttempts  int
-	blockMinutes int
+	db              *sqlx.DB
+	maxAttempts     int
+	blockMinutes    int
+	totpMaxAttempts int // TOTP 独立封锁阈值（默认 5，低于登录的 10）
 }
 
 // NewBruteForceProtector 创建暴力破解防护器
-func NewBruteForceProtector(db *sqlx.DB, maxAttempts, blockMinutes int) *BruteForceProtector {
+// totpMaxAttempts <= 0 时回退为 maxAttempts
+func NewBruteForceProtector(db *sqlx.DB, maxAttempts, blockMinutes, totpMaxAttempts int) *BruteForceProtector {
+	if totpMaxAttempts <= 0 {
+		totpMaxAttempts = maxAttempts
+	}
 	return &BruteForceProtector{
-		db:           db,
-		maxAttempts:  maxAttempts,
-		blockMinutes: blockMinutes,
+		db:              db,
+		maxAttempts:     maxAttempts,
+		blockMinutes:    blockMinutes,
+		totpMaxAttempts: totpMaxAttempts,
 	}
 }
 
@@ -116,13 +122,13 @@ func (p *BruteForceProtector) GetTotpAttempts(ctx context.Context, userID, ip st
 	return count, nil
 }
 
-// IsTotpBlocked 检查 TOTP 是否被封锁
+// IsTotpBlocked 检查 TOTP 是否被封锁（使用独立阈值 totpMaxAttempts）
 func (p *BruteForceProtector) IsTotpBlocked(ctx context.Context, userID, ip string) (bool, error) {
 	count, err := p.GetTotpAttempts(ctx, userID, ip)
 	if err != nil {
 		return false, err
 	}
-	return count >= p.maxAttempts, nil
+	return count >= p.totpMaxAttempts, nil
 }
 
 // ClearTotpAttempts 清除 TOTP 尝试记录

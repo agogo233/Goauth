@@ -9,6 +9,7 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 
 	"goauth/internal/model"
+	"goauth/internal/util"
 )
 
 func setupSessionTestDB(t *testing.T) *sqlx.DB {
@@ -146,8 +147,9 @@ func TestSessionRepo_FindByID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("FindByID() error = %v", err)
 	}
-	if found.Token != session.Token {
-		t.Errorf("FindByID() token = %s, want %s", found.Token, session.Token)
+	// 数据库存储的是 token 的 SHA-256 哈希，FindByID 返回哈希值
+	if found.Token != util.HashToken(session.Token) {
+		t.Errorf("FindByID() token = %s, want hash of %s", found.Token, session.Token)
 	}
 }
 

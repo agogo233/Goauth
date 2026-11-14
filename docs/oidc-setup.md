@@ -22,10 +22,6 @@ Grant Types: authorization_code
 > [!IMPORTANT]
 > 在 OIDC 应用页面顶部有一个下拉面板，包含 Goauth OIDC Provider 的相关信息，"客户端"应用在 OIDC 设置时可能需要这些信息。
 
-<p align=center>
-<img src="/public/screenshots/oidc-endpoints.png" width="500" alt="OIDC 端点信息">
-</p>
-
 > [!NOTE]
 > `Redirect URLs` 和 `PostLogout URL` 字段支持通配符，但使用时需谨慎。使用通配符 Redirect URLs 时，请务必遵循应用文档。
 

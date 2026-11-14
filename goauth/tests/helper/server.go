@@ -5,7 +5,9 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -15,6 +17,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"goauth/internal/config"
+	"goauth/internal/db"
 	"goauth/internal/handler"
 	"goauth/internal/middleware"
 	"goauth/internal/model"
@@ -59,8 +62,8 @@ func NewTestServer(t *testing.T) *TestServer {
 	database, err := sqlx.Open("sqlite3", ":memory:?_foreign_keys=on&_loc=UTC")
 	require.NoError(t, err, "Failed to open test database")
 
-	// 运行迁移
-	err = runMigrations(database)
+	// 使用生产迁移（确保测试与生产 schema 一致）
+	err = db.RunMigrations(database)
 	require.NoError(t, err, "Failed to run migrations")
 
 	// 创建测试配置
@@ -77,7 +80,7 @@ func NewTestServer(t *testing.T) *TestServer {
 	keyRepo := repo.NewKeyRepo(database)
 
 	// 创建 services
-	protector := util.NewBruteForceProtector(database, cfg.Security.LoginMaxAttempts, cfg.Security.LoginBlockDuration)
+	protector := util.NewBruteForceProtector(database, cfg.Security.LoginMaxAttempts, cfg.Security.LoginBlockDuration, cfg.Security.TotpMaxAttempts)
 	totpService := service.NewTotpService(database, cfg)
 	invitationService := service.NewInvitationService(invitationRepo, groupRepo, database)
 	authService := service.NewAuthService(userRepo, sessionRepo, groupRepo, totpService, invitationService, protector, cfg)
@@ -87,7 +90,7 @@ func NewTestServer(t *testing.T) *TestServer {
 
 	// 创建 handlers
 	authHandler := handler.NewAuthHandler(authService, userService, auditService, cfg)
-	userHandler := handler.NewUserHandler(userService, totpService, sessionRepo, cfg)
+	userHandler := handler.NewUserHandler(userService, totpService, sessionRepo, auditService, cfg)
 	adminHandler := handler.NewAdminHandler(
 		userService, groupService, auditService, invitationService, totpService,
 		userRepo, groupRepo, clientRepo, invitationRepo, proxyAuthRepo,
@@ -188,223 +191,7 @@ func newTestConfig() *config.Config {
 	}
 }
 
-// runMigrations 运行数据库迁移
-func runMigrations(db *sqlx.DB) error {
-	migrations := []string{
-		// Users table
-		`CREATE TABLE IF NOT EXISTS users (
-			id TEXT PRIMARY KEY,
-			email TEXT UNIQUE,
-			username TEXT UNIQUE NOT NULL,
-			name TEXT,
-			passwordHash TEXT,
-			isAdmin INTEGER DEFAULT 0,
-			emailVerified INTEGER DEFAULT 0,
-			approved INTEGER DEFAULT 0,
-			mfaRequired INTEGER DEFAULT 0,
-			disabled INTEGER DEFAULT 0,
-			createdAt TEXT NOT NULL,
-			updatedAt TEXT NOT NULL
-		)`,
 
-		// Sessions table
-		`CREATE TABLE IF NOT EXISTS sessions (
-			id TEXT PRIMARY KEY,
-			userId TEXT NOT NULL,
-			token TEXT NOT NULL UNIQUE,
-			amr TEXT,
-			totpAttempts INTEGER DEFAULT 0,
-			rememberMe INTEGER DEFAULT 0,
-			expiresAt TEXT NOT NULL,
-			createdAt TEXT NOT NULL,
-			FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE
-		)`,
-
-		// Groups table
-		`CREATE TABLE IF NOT EXISTS groups (
-			id TEXT PRIMARY KEY,
-			name TEXT UNIQUE NOT NULL,
-			mfaRequired INTEGER DEFAULT 0,
-			createdBy TEXT NOT NULL,
-			createdAt TEXT NOT NULL,
-			updatedAt TEXT NOT NULL,
-			FOREIGN KEY (createdBy) REFERENCES users(id)
-		)`,
-
-		// User-Group association
-		`CREATE TABLE IF NOT EXISTS user_groups (
-			userId TEXT NOT NULL,
-			groupId TEXT NOT NULL,
-			createdAt TEXT NOT NULL,
-			PRIMARY KEY (userId, groupId),
-			FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE,
-			FOREIGN KEY (groupId) REFERENCES groups(id) ON DELETE CASCADE
-		)`,
-
-		// TOTP table
-		`CREATE TABLE IF NOT EXISTS totp (
-			id TEXT PRIMARY KEY,
-			userId TEXT NOT NULL UNIQUE,
-			secret TEXT NOT NULL,
-			createdAt TEXT NOT NULL,
-			updatedAt TEXT NOT NULL,
-			FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE
-		)`,
-
-		// Login attempts table
-		`CREATE TABLE IF NOT EXISTS login_attempts (
-			id TEXT PRIMARY KEY,
-			username TEXT NOT NULL,
-			ip TEXT NOT NULL,
-			success INTEGER DEFAULT 0,
-			createdAt TEXT NOT NULL
-		)`,
-
-		// Audit log table
-		`CREATE TABLE IF NOT EXISTS audit_log (
-			id TEXT PRIMARY KEY,
-			action TEXT NOT NULL,
-			actorId TEXT,
-			targetId TEXT,
-			details TEXT,
-			ip TEXT NOT NULL,
-			createdAt TEXT NOT NULL
-		)`,
-
-		// Clients table (OIDC clients)
-		`CREATE TABLE IF NOT EXISTS clients (
-			id TEXT PRIMARY KEY,
-			name TEXT NOT NULL,
-			secret TEXT,
-			redirectUris TEXT NOT NULL,
-			postLogoutUris TEXT,
-			scopes TEXT NOT NULL,
-			grantTypes TEXT NOT NULL,
-			responseTypes TEXT NOT NULL,
-			tokenEndpointAuth TEXT DEFAULT 'client_secret_basic',
-			trusted INTEGER DEFAULT 0,
-			createdBy TEXT NOT NULL,
-			createdAt TEXT NOT NULL,
-			updatedAt TEXT NOT NULL,
-			FOREIGN KEY (createdBy) REFERENCES users(id)
-		)`,
-
-		// Invitations table
-		`CREATE TABLE IF NOT EXISTS invitations (
-			id TEXT PRIMARY KEY,
-			email TEXT,
-			username TEXT,
-			name TEXT,
-			emailVerified INTEGER DEFAULT 0,
-			challenge TEXT NOT NULL UNIQUE,
-			createdBy TEXT NOT NULL,
-			expiresAt TEXT NOT NULL,
-			createdAt TEXT NOT NULL,
-			FOREIGN KEY (createdBy) REFERENCES users(id)
-		)`,
-
-		// Invitation-Group association
-		`CREATE TABLE IF NOT EXISTS invitation_groups (
-			invitationId TEXT NOT NULL,
-			groupId TEXT NOT NULL,
-			PRIMARY KEY (invitationId, groupId),
-			FOREIGN KEY (invitationId) REFERENCES invitations(id) ON DELETE CASCADE,
-			FOREIGN KEY (groupId) REFERENCES groups(id) ON DELETE CASCADE
-		)`,
-
-		// ProxyAuth table
-		`CREATE TABLE IF NOT EXISTS proxy_auth (
-			id TEXT PRIMARY KEY,
-			domain TEXT NOT NULL UNIQUE,
-			mfaRequired INTEGER DEFAULT 0,
-			maxSessionLength INTEGER,
-			createdBy TEXT NOT NULL,
-			createdAt TEXT NOT NULL,
-			updatedAt TEXT NOT NULL,
-			FOREIGN KEY (createdBy) REFERENCES users(id)
-		)`,
-
-		// ProxyAuth-Group association
-		`CREATE TABLE IF NOT EXISTS proxy_auth_groups (
-			proxyAuthId TEXT NOT NULL,
-			groupId TEXT NOT NULL,
-			PRIMARY KEY (proxyAuthId, groupId),
-			FOREIGN KEY (proxyAuthId) REFERENCES proxy_auth(id) ON DELETE CASCADE,
-			FOREIGN KEY (groupId) REFERENCES groups(id) ON DELETE CASCADE
-		)`,
-
-		// OIDC AuthRequests table
-		`CREATE TABLE IF NOT EXISTS oidc_auth_requests (
-			id TEXT PRIMARY KEY,
-			clientId TEXT NOT NULL,
-			userId TEXT,
-			scopes TEXT,
-			redirectUri TEXT,
-			state TEXT,
-			codeChallenge TEXT,
-			codeChallengeMethod TEXT,
-			createdAt TEXT NOT NULL,
-			expiresAt TEXT NOT NULL,
-			FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE
-		)`,
-
-		// OIDC Tokens table
-		`CREATE TABLE IF NOT EXISTS oidc_tokens (
-			id TEXT PRIMARY KEY,
-			userId TEXT NOT NULL,
-			clientId TEXT NOT NULL,
-			tokenType TEXT NOT NULL,
-			token TEXT NOT NULL UNIQUE,
-			scopes TEXT,
-			expiresAt TEXT NOT NULL,
-			createdAt TEXT NOT NULL,
-			FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE
-		)`,
-
-		// OIDC Payloads table (通用 OIDC 存储)
-		// 注意：测试环境移除外键约束以简化测试
-		`CREATE TABLE IF NOT EXISTS oidc_payloads (
-			id TEXT PRIMARY KEY,
-			type TEXT NOT NULL,
-			payload TEXT NOT NULL,
-			grantId TEXT,
-			userCode TEXT,
-			uid TEXT,
-			expiresAt TEXT,
-			consumedAt TEXT,
-			accountId TEXT
-		)`,
-
-		// Keys table (for JWT signing)
-		`CREATE TABLE IF NOT EXISTS keys (
-			id TEXT PRIMARY KEY,
-			type TEXT NOT NULL,
-			privateKey TEXT,
-			publicKey TEXT,
-			value TEXT,
-			expiresAt TEXT,
-			createdAt TEXT NOT NULL
-		)`,
-
-		// Indexes
-		`CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token)`,
-		`CREATE INDEX IF NOT EXISTS idx_sessions_userId ON sessions(userId)`,
-		`CREATE INDEX IF NOT EXISTS idx_sessions_expiresAt ON sessions(expiresAt)`,
-		`CREATE INDEX IF NOT EXISTS idx_login_attempts_username ON login_attempts(username)`,
-		`CREATE INDEX IF NOT EXISTS idx_login_attempts_ip ON login_attempts(ip)`,
-		`CREATE INDEX IF NOT EXISTS idx_login_attempts_createdAt ON login_attempts(createdAt)`,
-		`CREATE INDEX IF NOT EXISTS idx_invitations_challenge ON invitations(challenge)`,
-		`CREATE INDEX IF NOT EXISTS idx_oidc_tokens_token ON oidc_tokens(token)`,
-	}
-
-	for i, migration := range migrations {
-		if _, err := db.Exec(migration); err != nil {
-			return err
-		}
-		_ = i // avoid unused variable warning
-	}
-	return nil
-}
 
 // setupTestRouter 设置测试路由
 func setupTestRouter(authHandler *handler.AuthHandler, userHandler *handler.UserHandler, adminHandler *handler.AdminHandler, proxyAuthHandler *handler.ProxyAuthHandler, authMiddleware *middleware.AuthMiddleware) *gin.Engine {
@@ -581,6 +368,43 @@ func (s *TestServer) LoginAsUser(t *testing.T, opts ...UserOption) (*model.User,
 	return user, token
 }
 
+// HTTPLogin 通过 HTTP 登录端点登录，返回 session token 与 CSRF token
+func (s *TestServer) HTTPLogin(t *testing.T, username, password string) (string, string) {
+	t.Helper()
+
+	body := `{"username":"` + username + `","password":"` + password + `"}`
+	resp, err := http.Post(s.Server.URL+"/api/auth/login", "application/json", strings.NewReader(body))
+	require.NoError(t, err, "HTTP login failed")
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode, "HTTP login failed")
+
+	var sessionToken, csrfToken string
+	for _, ck := range resp.Cookies() {
+		switch ck.Name {
+		case "session":
+			sessionToken = ck.Value
+		case "csrf_token":
+			csrfToken = ck.Value
+		}
+	}
+	require.NotEmpty(t, sessionToken, "登录响应缺少 session cookie")
+	require.NotEmpty(t, csrfToken, "登录响应缺少 csrf_token cookie")
+	return sessionToken, csrfToken
+}
+
+// LoginAsUserHTTP 创建用户并通过 HTTP 登录端点登录，返回用户、session token 与 CSRF token
+func (s *TestServer) LoginAsUserHTTP(t *testing.T, opts ...UserOption) (*model.User, string, string) {
+	t.Helper()
+
+	// 默认密码
+	defaultPassword := "My-Test-Pass-2024-Secure!"
+	opts = append(opts, WithPassword(defaultPassword))
+
+	user := s.CreateUser(t, opts...)
+	sessionToken, csrfToken := s.HTTPLogin(t, user.Username, defaultPassword)
+	return user, sessionToken, csrfToken
+}
+
 // UserOption 用户创建选项
 type UserOption func(*model.User)
 
@@ -736,8 +560,11 @@ func (s *TestServer) CreateClient(t *testing.T, opts ...ClientOption) *model.Cli
 	grantTypes, _ := json.Marshal([]string{"authorization_code", "refresh_token"})
 	responseTypes, _ := json.Marshal([]string{"code"})
 
+	// 生成随机客户端 ID，避免多个测试间冲突（clients 表主键全局唯一）
+	clientID := "test-client-" + generateUniqueID()
+
 	client := &model.Client{
-		ID:             "test-client",
+		ID:             clientID,
 		Name:           "Test Client",
 		RedirectURIs:   string(redirectURIs),
 		PostLogoutURIs: string(postLogoutUris),
@@ -851,6 +678,14 @@ func WithScopes(scopes []string) ClientOption {
 func WithTrusted(trusted bool) ClientOption {
 	return func(c *model.Client) {
 		c.Trusted = trusted
+	}
+}
+
+// WithPostLogoutURIs 设置登出重定向 URI
+func WithPostLogoutURIs(uris []string) ClientOption {
+	return func(c *model.Client) {
+		data, _ := json.Marshal(uris)
+		c.PostLogoutURIs = string(data)
 	}
 }
 

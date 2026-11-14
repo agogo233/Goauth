@@ -130,7 +130,7 @@ func setupAuthService(t *testing.T) (*sqlx.DB, *AuthService) {
 	groupRepo := repo.NewGroupRepo(db)
 	invitationRepo := repo.NewInvitationRepo(db)
 	totpService := NewTotpService(db, cfg)
-	protector := util.NewBruteForceProtector(db, cfg.Security.LoginMaxAttempts, cfg.Security.LoginBlockDuration)
+	protector := util.NewBruteForceProtector(db, cfg.Security.LoginMaxAttempts, cfg.Security.LoginBlockDuration, cfg.Security.TotpMaxAttempts)
 	invitationService := NewInvitationService(invitationRepo, groupRepo, db)
 	authService := NewAuthService(userRepo, sessionRepo, groupRepo, totpService, invitationService, protector, cfg)
 

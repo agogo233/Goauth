@@ -627,10 +627,6 @@ Redirect URLs: https://portainer.example.com
 > [!NOTE]
 > Scopes 用空格分隔，**不是**逗号。
 
-<p align=center>
-<img width="1400" src="/public/screenshots/portainer-oauth.png" alt="Portainer OAuth 配置" />
-</p>
-
 <br>
 
 ## <img src="https://cdn.jsdelivr.net/gh/selfhst/icons@main/svg/proxmox.svg" width="28" /> Proxmox PVE
@@ -669,10 +665,6 @@ Redirect URLs: https://pve.example.com
 
 > [!NOTE]
 > 如果你不使用自动创建，则需要手动创建组和用户。PVE 权限可能相当复杂。我们建议按照他们的 Wiki 操作，因为每个设置都有自己的一套规则。
-
-<p align=center>
-<img width="600" src="/public/screenshots/proxmox-oidc.png" alt="Proxmox OIDC 配置" />
-</p>
 
 <br>
 

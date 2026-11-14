@@ -236,8 +236,8 @@ test.describe('禁用用户访问 ProxyAuth', () => {
     });
 
     if (loginResponse.status() === 200) {
-      const loginData = await loginResponse.json();
-      disabledUserSession = loginData.token;
+      // token 改为 HttpOnly cookie 下发，从 Set-Cookie 提取
+      disabledUserSession = loginResponse.headers().get("set-cookie")?.match(/session=([^;]+)/)?.[1] || "";
     }
 
     // 禁用用户

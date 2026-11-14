@@ -11,6 +11,7 @@ import (
 	"github.com/pquerna/otp/totp"
 
 	"goauth/internal/config"
+	dbpkg "goauth/internal/db"
 	"goauth/internal/util"
 )
 
@@ -22,33 +23,9 @@ func setupTotpTestDB(t *testing.T) *sqlx.DB {
 		t.Fatalf("Failed to open test database: %v", err)
 	}
 
-	// 创建必要的表
-	schema := `
-	CREATE TABLE IF NOT EXISTS totp (
-		id TEXT PRIMARY KEY,
-		userId TEXT NOT NULL UNIQUE,
-		secret TEXT NOT NULL,
-		createdAt TEXT NOT NULL,
-		updatedAt TEXT NOT NULL
-	);
-	CREATE TABLE IF NOT EXISTS users (
-		id TEXT PRIMARY KEY,
-		email TEXT UNIQUE,
-		username TEXT UNIQUE NOT NULL,
-		name TEXT,
-		passwordHash TEXT,
-		isAdmin INTEGER DEFAULT 0,
-		emailVerified INTEGER DEFAULT 0,
-		approved INTEGER DEFAULT 0,
-		mfaRequired INTEGER DEFAULT 0,
-		disabled INTEGER DEFAULT 0,
-		createdAt TEXT NOT NULL,
-		updatedAt TEXT NOT NULL
-	);
-	`
-	_, err = db.Exec(schema)
-	if err != nil {
-		t.Fatalf("Failed to create schema: %v", err)
+	// 复用生产迁移，保证测试与生产 schema 一致
+	if err := dbpkg.RunMigrations(db); err != nil {
+		t.Fatalf("Failed to run migrations: %v", err)
 	}
 
 	t.Cleanup(func() {
@@ -278,6 +255,15 @@ func TestTotpService_GenerateBackupCodes(t *testing.T) {
 	cfg := setupTotpTestConfig()
 	svc := NewTotpService(db, cfg)
 	ctx := context.Background()
+
+	// 创建测试用户（totp_backup_codes 有外键约束）
+	now := time.Now()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO users (id, username, createdAt, updatedAt)
+		VALUES (?, ?, ?, ?)
+	`, "user1", "testuser", now, now); err != nil {
+		t.Fatalf("Failed to create test user: %v", err)
+	}
 
 	codes, err := svc.GenerateBackupCodes(ctx, "user1")
 	if err != nil {
@@ -624,6 +610,15 @@ func TestTotpService_GenerateBackupCodes_Format(t *testing.T) {
 	svc := NewTotpService(db, cfg)
 	ctx := context.Background()
 
+	// 创建测试用户（totp_backup_codes 有外键约束）
+	now := time.Now()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO users (id, username, createdAt, updatedAt)
+		VALUES (?, ?, ?, ?)
+	`, "user1", "testuser", now, now); err != nil {
+		t.Fatalf("Failed to create test user: %v", err)
+	}
+
 	codes, err := svc.GenerateBackupCodes(ctx, "user1")
 	if err != nil {
 		t.Fatalf("GenerateBackupCodes() error = %v", err)
@@ -647,9 +642,24 @@ func TestTotpService_GenerateBackupCodes_Uniqueness(t *testing.T) {
 	svc := NewTotpService(db, cfg)
 	ctx := context.Background()
 
+	// 创建测试用户（totp_backup_codes 有外键约束）
+	now := time.Now()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO users (id, username, createdAt, updatedAt)
+		VALUES (?, ?, ?, ?)
+	`, "user1", "testuser", now, now); err != nil {
+		t.Fatalf("Failed to create test user: %v", err)
+	}
+
 	// 生成两组备用码
-	codes1, _ := svc.GenerateBackupCodes(ctx, "user1")
-	codes2, _ := svc.GenerateBackupCodes(ctx, "user1")
+	codes1, err := svc.GenerateBackupCodes(ctx, "user1")
+	if err != nil {
+		t.Fatalf("GenerateBackupCodes() #1 error = %v", err)
+	}
+	codes2, err := svc.GenerateBackupCodes(ctx, "user1")
+	if err != nil {
+		t.Fatalf("GenerateBackupCodes() #2 error = %v", err)
+	}
 
 	// 两组应该不同
 	sameCount := 0

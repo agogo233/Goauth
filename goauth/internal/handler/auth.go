@@ -54,20 +54,13 @@ func (h *AuthHandler) setSessionCookie(c *gin.Context, token string, maxAge int)
 	c.SetCookie("session", token, maxAge, "/", domain, secure, true)
 }
 
-// setCSRFToken 设置 CSRF token cookie
+// setCSRFToken 生成并设置（轮换）CSRF token cookie
 func (h *AuthHandler) setCSRFToken(c *gin.Context) {
-	csrfToken, err := middleware.GenerateCSRFToken()
-	if err != nil {
-		log.Error().Err(err).Msg("Failed to generate CSRF token")
-		return
-	}
-
 	secure := h.cfg.IsCookieSecure()
-	sameSite := h.cfg.GetCookieSameSite()
 	domain := h.cfg.Server.CookieDomain
 
 	var sameSiteValue http.SameSite
-	switch sameSite {
+	switch h.cfg.GetCookieSameSite() {
 	case "strict":
 		sameSiteValue = http.SameSiteStrictMode
 	case "none":
@@ -76,7 +69,9 @@ func (h *AuthHandler) setCSRFToken(c *gin.Context) {
 		sameSiteValue = http.SameSiteLaxMode
 	}
 
-	middleware.SetCSRFToken(c, csrfToken, secure, sameSiteValue, domain)
+	if _, err := middleware.RotateCSRFToken(c, secure, sameSiteValue, domain); err != nil {
+		log.Error().Err(err).Msg("Failed to rotate CSRF token")
+	}
 }
 
 // Login 登录

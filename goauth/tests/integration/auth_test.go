@@ -176,7 +176,18 @@ func TestAuth_Login_Success(t *testing.T) {
 	err = json.Unmarshal(body, &result)
 	require.NoError(t, err)
 
-	assert.NotEmpty(t, result.Token, "应该返回 token")
+	// Token 已改为 json:"-"，不再出现在 JSON 响应体中（防 XSS 窃取）
+	assert.Empty(t, result.Token, "登录响应体不应包含 token")
+
+	// 从 Set-Cookie 中提取 session token
+	var sessionToken string
+	for _, ck := range resp.Cookies() {
+		if ck.Name == "session" {
+			sessionToken = ck.Value
+		}
+	}
+	assert.NotEmpty(t, sessionToken, "登录响应应通过 HttpOnly cookie 下发 session")
+
 	assert.NotNil(t, result.User, "应该返回用户信息")
 	assert.Equal(t, "loginuser", result.User.Username)
 	assert.False(t, result.RequireTotp, "未启用 TOTP 时不应要求验证")
@@ -361,16 +372,17 @@ func TestAuth_Logout(t *testing.T) {
 	server := helper.NewTestServer(t)
 	defer server.Close()
 
-	// 创建并登录用户
-	_, token := server.LoginAsUser(t, helper.WithUsername("logoutuser"))
+	// 创建并登录用户（HTTP 登录以获取 CSRF token）
+	_, token, csrfToken := server.LoginAsUserHTTP(t, helper.WithUsername("logoutuser"))
 
-	// 登出
+	// 登出（必须携带 CSRF token）
 	req, err := http.NewRequest("POST", server.Server.URL+"/api/auth/logout", nil)
 	require.NoError(t, err)
 	req.AddCookie(&http.Cookie{
 		Name:  "session",
 		Value: token,
 	})
+	req.Header.Set("X-CSRF-Token", csrfToken)
 
 	client := &http.Client{}
 	resp, err := client.Do(req)
@@ -495,10 +507,24 @@ func TestAuth_FullFlow(t *testing.T) {
 	var loginResult service.LoginResponse
 	err = json.Unmarshal(body, &loginResult)
 	require.NoError(t, err)
+	_ = loginResult // token 已不再通过 JSON 下发，改用下方 cookie 中的 session
+
+	// 提取登录响应中的 session token（HttpOnly cookie）
+	var csrfToken string
+	var sessionToken string
+	for _, ck := range resp.Cookies() {
+		if ck.Name == "csrf_token" {
+			csrfToken = ck.Value
+		}
+		if ck.Name == "session" {
+			sessionToken = ck.Value
+		}
+	}
+	require.NotEmpty(t, csrfToken, "登录响应应携带 csrf_token cookie")
+	require.NotEmpty(t, sessionToken, "登录响应应通过 HttpOnly cookie 下发 session")
 	resp.Body.Close()
 
-	token := loginResult.Token
-	require.NotEmpty(t, token)
+	token := sessionToken
 
 	// 3. 获取用户信息
 	req, err := http.NewRequest("GET", server.Server.URL+"/api/user/me", nil)
@@ -514,13 +540,14 @@ func TestAuth_FullFlow(t *testing.T) {
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 	resp.Body.Close()
 
-	// 4. 登出
+	// 4. 登出（必须携带 CSRF token）
 	req, err = http.NewRequest("POST", server.Server.URL+"/api/auth/logout", nil)
 	require.NoError(t, err)
 	req.AddCookie(&http.Cookie{
 		Name:  "session",
 		Value: token,
 	})
+	req.Header.Set("X-CSRF-Token", csrfToken)
 
 	resp, err = client.Do(req)
 	require.NoError(t, err)

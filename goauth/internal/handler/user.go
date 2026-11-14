@@ -6,8 +6,10 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/rs/zerolog/log"
 
 	"goauth/internal/config"
+	"goauth/internal/middleware"
 	"goauth/internal/model"
 	"goauth/internal/repo"
 	"goauth/internal/service"
@@ -15,19 +17,41 @@ import (
 
 // UserHandler 用户 Handler
 type UserHandler struct {
-	userService *service.UserService
-	totpService *service.TotpService
-	sessionRepo *repo.SessionRepo
-	cfg         *config.Config
+	userService  *service.UserService
+	totpService  *service.TotpService
+	sessionRepo  *repo.SessionRepo
+	auditService *service.AuditService
+	cfg          *config.Config
 }
 
 // NewUserHandler 创建用户 Handler
-func NewUserHandler(userService *service.UserService, totpService *service.TotpService, sessionRepo *repo.SessionRepo, cfg *config.Config) *UserHandler {
+func NewUserHandler(userService *service.UserService, totpService *service.TotpService, sessionRepo *repo.SessionRepo, auditService *service.AuditService, cfg *config.Config) *UserHandler {
 	return &UserHandler{
-		userService: userService,
-		totpService: totpService,
-		sessionRepo: sessionRepo,
-		cfg:         cfg,
+		userService:  userService,
+		totpService:  totpService,
+		sessionRepo:  sessionRepo,
+		auditService: auditService,
+		cfg:          cfg,
+	}
+}
+
+// rotateCSRFToken 在凭据变更成功后轮换 CSRF token
+func (h *UserHandler) rotateCSRFToken(c *gin.Context) {
+	secure := h.cfg.IsCookieSecure()
+	domain := h.cfg.Server.CookieDomain
+
+	var sameSiteValue http.SameSite
+	switch h.cfg.GetCookieSameSite() {
+	case "strict":
+		sameSiteValue = http.SameSiteStrictMode
+	case "none":
+		sameSiteValue = http.SameSiteNoneMode
+	default:
+		sameSiteValue = http.SameSiteLaxMode
+	}
+
+	if _, err := middleware.RotateCSRFToken(c, secure, sameSiteValue, domain); err != nil {
+		log.Error().Err(err).Msg("Failed to rotate CSRF token")
 	}
 }
 
@@ -115,6 +139,12 @@ func (h *UserHandler) UpdatePassword(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+
+	actorID := userID
+	_ = h.auditService.Log(c.Request.Context(), model.AuditActionPasswordReset, &actorID, &userID, nil, c.ClientIP())
+
+	// 密码变更后轮换 CSRF token
+	h.rotateCSRFToken(c)
 
 	c.JSON(http.StatusOK, gin.H{"message": "密码已更新"})
 }
@@ -217,6 +247,9 @@ func (h *UserHandler) VerifyTotp(c *gin.Context) {
 		}
 	}
 
+	// MFA 绑定成功后轮换 CSRF token
+	h.rotateCSRFToken(c)
+
 	c.JSON(http.StatusOK, gin.H{"valid": true})
 }
 
@@ -294,6 +327,9 @@ func (h *UserHandler) VerifyBackupCode(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的备用码"})
 		return
 	}
+
+	// 备用码验证成功后轮换 CSRF token
+	h.rotateCSRFToken(c)
 
 	c.JSON(http.StatusOK, gin.H{"valid": true})
 }

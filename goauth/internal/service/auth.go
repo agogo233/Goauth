@@ -70,7 +70,8 @@ type LoginRequest struct {
 
 // LoginResponse 登录响应
 type LoginResponse struct {
-	Token           string              `json:"token"`
+	// Token 会话令牌：仅用于服务端设置 HttpOnly cookie，禁止序列化到 JSON 响应体
+	Token           string              `json:"-"`
 	User            *model.UserResponse `json:"user"`
 	ExpiresAt       time.Time           `json:"expiresAt"`
 	RequireTotp     bool                `json:"requireTotp"`
@@ -445,8 +446,9 @@ type RegisterRequest struct {
 
 // RegisterResponse 注册响应
 type RegisterResponse struct {
-	User     *model.UserResponse `json:"user"`
-	Message  string              `json:"message"`
+	User             *model.UserResponse `json:"user"`
+	Message          string              `json:"message"`
+	RequiresApproval bool                `json:"requiresApproval"` // 是否需要管理员审批
 }
 
 // Register 注册
@@ -463,7 +465,7 @@ func (s *AuthService) Register(ctx context.Context, req *RegisterRequest) (*Regi
 		return nil, err
 	}
 
-	passwordHash, err := util.HashPassword(req.Password)
+	passwordHash, err := util.HashPasswordWithCost(req.Password, s.cfg.Security.BcryptCost)
 	if err != nil {
 		return nil, err
 	}
@@ -524,8 +526,9 @@ func (s *AuthService) Register(ctx context.Context, req *RegisterRequest) (*Regi
 	}
 
 	return &RegisterResponse{
-		User:    user.ToResponse(),
-		Message: message,
+		User:             user.ToResponse(),
+		Message:          message,
+		RequiresApproval: !approved,
 	}, nil
 }
 

@@ -892,7 +892,10 @@ export async function logoutUser(page: Page): Promise<void> {
   // 使用页面上下文调用登出 API（这样会携带 session cookie）
   await page.evaluate(async () => {
     try {
-      await fetch('/api/auth/logout', { method: 'POST' });
+      const csrfToken = decodeURIComponent(
+        document.cookie.split(';').find((c: string) => c.trim().startsWith('csrf_token='))?.split('=')[1] || ''
+      );
+      await fetch('/api/auth/logout', { method: 'POST', headers: { 'X-CSRF-Token': csrfToken } });
     } catch {
       // 忽略错误
     }

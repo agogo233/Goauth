@@ -244,9 +244,12 @@ test.describe('会话劫持攻击防御', () => {
     saveTestData(testData);
     
     // 测试：登录后 session 应该改变
-    // 先登出，然后重新登录，验证 session 变化
+    // 先登出，然后重新登录，验证 session 变化（携带 CSRF token）
     await page.evaluate(async () => {
-      await fetch('/api/auth/logout', { method: 'POST' });
+      const csrfToken = decodeURIComponent(
+        document.cookie.split(';').find((c: string) => c.trim().startsWith('csrf_token='))?.split('=')[1] || ''
+      );
+      await fetch('/api/auth/logout', { method: 'POST', headers: { 'X-CSRF-Token': csrfToken } });
     });
     await context.clearCookies();
     
@@ -355,13 +358,11 @@ test.describe('越权访问防御 (IDOR)', () => {
     });
     
     if (login1.status() === 200 && login2.status() === 200) {
-      const login1Data = await login1.json();
-      const login2Data = await login2.json();
-      
-      testData.user1Session = login1Data.token;
+      // token 改为 HttpOnly cookie 下发，从 Set-Cookie 提取
+      testData.user1Session = login1.headers().get("set-cookie")?.match(/session=([^;]+)/)?.[1] || "";
       testData.user1Id = user1Record?.id;
       testData.user1Username = user1Username;
-      testData.user2Session = login2Data.token;
+      testData.user2Session = login2.headers().get("set-cookie")?.match(/session=([^;]+)/)?.[1] || "";
       testData.user2Id = user2Record?.id;
       testData.user2Username = user2Username;
     }

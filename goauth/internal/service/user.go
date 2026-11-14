@@ -115,7 +115,7 @@ func (s *UserService) UpdatePassword(ctx context.Context, userID string, oldPass
 	}
 
 	// 哈希新密码
-	passwordHash, err := util.HashPassword(newPassword)
+	passwordHash, err := util.HashPasswordWithCost(newPassword, s.cfg.Security.BcryptCost)
 	if err != nil {
 		return err
 	}
@@ -137,7 +137,7 @@ func (s *UserService) AdminResetPassword(ctx context.Context, userID string, new
 	}
 
 	// 哈希密码
-	passwordHash, err := util.HashPassword(newPassword)
+	passwordHash, err := util.HashPasswordWithCost(newPassword, s.cfg.Security.BcryptCost)
 	if err != nil {
 		return err
 	}
@@ -164,7 +164,9 @@ func (s *UserService) ApproveUser(ctx context.Context, userID string) error {
 	}
 
 	user.Approved = true
-	// 修复：审批时不自动验证邮箱，让用户自行通过邮件链接验证
+	// 管理员审批即视为管理员已核验用户身份，同步标记邮箱已验证，
+	// 否则无邮件服务的部署中用户将永远无法通过 EmailVerified 检查登录
+	user.EmailVerified = true
 	return s.userRepo.Update(ctx, user)
 }
 

@@ -47,8 +47,8 @@ labels:
 ```
 
 Traefik 会将请求先发送到 Goauth 进行认证，认证通过后：
-- 请求头会添加 `X-Forwarded-User`、`X-Forwarded-Email`、`X-Forwarded-Groups`
-- 后端服务可根据这些 header 识别用户
+- 响应头会携带 `X-User-Id`、`X-User-Name`、`X-User-Email`
+- 配合 `authResponseHeaders`，后端服务可通过这些 header 识别用户
 
 ## 环境变量
 

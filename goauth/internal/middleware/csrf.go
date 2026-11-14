@@ -164,6 +164,17 @@ func SetCSRFToken(c *gin.Context, token string, secure bool, sameSite http.SameS
 	c.SetCookie(CSRFCookieName, token, 0, "/", domain, secure, false)
 }
 
+// RotateCSRFToken 生成新的 CSRF token 并写入 cookie
+// 用于登录、MFA 验证、密码修改等凭据变更成功后轮换 token，避免整个会话期使用同一 token
+func RotateCSRFToken(c *gin.Context, secure bool, sameSite http.SameSite, domain string) (string, error) {
+	token, err := GenerateCSRFToken()
+	if err != nil {
+		return "", err
+	}
+	SetCSRFToken(c, token, secure, sameSite, domain)
+	return token, nil
+}
+
 // GetCSRFCookieName 获取 CSRF cookie 名称
 func GetCSRFCookieName() string {
 	return CSRFCookieName

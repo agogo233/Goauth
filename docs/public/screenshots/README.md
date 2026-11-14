@@ -2,50 +2,27 @@
 
 本目录存放文档所需的截图文件。
 
-## 截图列表
+## 已有截图
 
-### 用户指南 (user-guide.md)
+| 文件名 | 说明 | 引用文档 |
+|--------|------|----------|
+| login.png | 登录页面 | user-guide.md |
+| signup.png | 注册页面 | user-guide.md |
+| profile.png | 个人设置页面 | user-guide.md |
+| invitation.png | 邀请管理页面 | user-management.md |
+| user-edit.png | 用户编辑页面 | user-management.md |
+| groups.png | 安全组管理页面 | security-groups.md |
+| password-resets.png | 密码重置管理页面 | password-reset.md |
+| oidc-client.png | OIDC 客户端配置页面 | oidc-setup.md |
+| proxy-domain.png | ProxyAuth 域名设置页面 | proxy-auth.md |
 
-| 文件名 | 说明 | 尺寸 |
-|--------|------|------|
-| login.png | 登录页面 | 500x500 |
-| signup.png | 注册页面 | 500x600 |
-| mfa-required.png | MFA 验证页面 | 待补充 |
-| mfa-register.png | MFA 注册页面 | 待补充 |
-| profile.png | 个人设置页面 | 500x600 |
+## 待补充截图
 
-### 用户管理 (user-management.md)
+以下截图尚未提供，相关文档正文暂未引用，补充后可再添加到对应文档：
 
-| 文件名 | 说明 | 尺寸 |
-|--------|------|------|
-| invitation.png | 邀请管理页面 | 1400x900 |
-| user-edit.png | 用户管理页面 | 1400x900 |
-
-### 安全组 (security-groups.md)
-
-| 文件名 | 说明 | 尺寸 |
-|--------|------|------|
-| groups.png | 安全组管理页面 | 1400x900 |
-
-### 密码重置 (password-reset.md)
-
-| 文件名 | 说明 | 尺寸 |
-|--------|------|------|
-| password-resets.png | 密码重置管理页面 | 1400x900 |
-
-### OIDC 应用设置 (oidc-setup.md)
-
-| 文件名 | 说明 | 尺寸 |
-|--------|------|------|
-| oidc-client.png | OIDC 客户端配置页面 | 1400x900 |
-| oidc-endpoints.png | OIDC 端点信息面板 | 待补充 |
-
-### 代理认证 (proxy-auth.md)
-
-| 文件名 | 说明 | 尺寸 |
-|--------|------|------|
-| proxy-domain.png | ProxyAuth 域名设置页面 | 1400x900 |
-| proxy-authz.png | ProxyAuth 授权规则示例 | 待补充 |
+- `mfa-required.png` / `mfa-register.png`（MFA 验证/注册页面，user-guide.md）
+- `oidc-endpoints.png`（OIDC 端点信息面板，oidc-setup.md）
+- `proxy-authz.png`（ProxyAuth 授权规则示例，proxy-auth.md）
 
 ## 截图规范
 
@@ -62,6 +39,7 @@
 cd goauth
 make build
 ./bin/goauth serve &
+# 使用 Playwright 生成截图（可自行编写截图脚本/配置）
 cd tests/e2e
-npx playwright test --config=screenshot.config.ts
+npx playwright test
 ```

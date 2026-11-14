@@ -150,9 +150,12 @@ test.describe('首次启动流程', () => {
       // 验证登录成功
       await expect(page.locator('h1:has-text("管理后台")')).toBeVisible({ timeout: 10000 });
       
-      // 使用 API 登出
+      // 使用 API 登出（携带 CSRF token）
       await page.evaluate(async () => {
-        await fetch('/api/auth/logout', { method: 'POST' });
+        const csrfToken = decodeURIComponent(
+          document.cookie.split(';').find((c: string) => c.trim().startsWith('csrf_token='))?.split('=')[1] || ''
+        );
+        await fetch('/api/auth/logout', { method: 'POST', headers: { 'X-CSRF-Token': csrfToken } });
       });
       
       // 清除 cookies 并刷新页面

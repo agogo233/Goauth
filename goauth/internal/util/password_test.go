@@ -175,3 +175,36 @@ func TestHashPasswordAndVerifyIntegration(t *testing.T) {
 		})
 	}
 }
+
+func TestGenerateRandomPasswordDistribution(t *testing.T) {
+	const total = 100000
+	const charsetLen = 70 // 与 GenerateRandomPassword 的 charset 长度一致（26+26+10+8）
+
+	password, err := GenerateRandomPassword(total)
+	if err != nil {
+		t.Fatalf("GenerateRandomPassword() error = %v", err)
+	}
+
+	counts := make(map[byte]int)
+	for i := 0; i < len(password); i++ {
+		counts[password[i]]++
+	}
+	if len(counts) != charsetLen {
+		t.Errorf("出现 %d 种字符，期望 %d 种", len(counts), charsetLen)
+	}
+
+	// 卡方检验：拒绝采样下各字符应等概率。
+	// 均匀随机时 χ² 期望 ≈ df=69，标准差 ≈ sqrt(2·df) ≈ 11.7；
+	// 取 120（约期望 + 4σ）为失败阈值，误报率极低。
+	// 旧的 %len 取模实现因 256%70=46 的偏差，χ² 期望值约 1000+，必被捕获。
+	want := float64(total) / charsetLen
+	var chi2 float64
+	for _, cnt := range counts {
+		d := float64(cnt) - want
+		chi2 += d * d / want
+	}
+	if chi2 > 120 {
+		t.Errorf("字符分布卡方值 %.1f 超过阈值 120，存在取模偏差", chi2)
+	}
+	t.Logf("χ² = %.1f (df=69, 期望约 69)", chi2)
+}

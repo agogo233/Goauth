@@ -16,9 +16,18 @@ var (
 	ErrEmailInvalid       = errors.New("邮箱格式无效")
 )
 
-// HashPassword 哈希密码
+// HashPassword 哈希密码（使用默认 cost）
 func HashPassword(password string) (string, error) {
-	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	return HashPasswordWithCost(password, bcrypt.DefaultCost)
+}
+
+// HashPasswordWithCost 以指定 cost 哈希密码
+// cost 会自动收敛到 bcrypt 允许范围，非法值回退为默认 cost
+func HashPasswordWithCost(password string, cost int) (string, error) {
+	if cost < bcrypt.MinCost || cost > bcrypt.MaxCost {
+		cost = bcrypt.DefaultCost
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), cost)
 	if err != nil {
 		return "", ErrPasswordHashFailed
 	}
@@ -60,14 +69,22 @@ func PasswordScore(password string) int {
 }
 
 // GenerateRandomPassword 生成随机密码
+// 使用拒绝采样消除取模偏差，确保每个字符等概率出现
 func GenerateRandomPassword(length int) (string, error) {
 	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*"
 	b := make([]byte, length)
-	if _, err := rand.Read(b); err != nil {
-		return "", err
-	}
+	max := byte(256 - 256%len(charset))
 	for i := range b {
-		b[i] = charset[int(b[i])%len(charset)]
+		var v [1]byte
+		for {
+			if _, err := rand.Read(v[:]); err != nil {
+				return "", err
+			}
+			if v[0] < max {
+				b[i] = charset[int(v[0])%len(charset)]
+				break
+			}
+		}
 	}
 	return string(b), nil
 }

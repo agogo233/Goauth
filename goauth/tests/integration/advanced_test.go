@@ -14,6 +14,7 @@ import (
 
 	"goauth/internal/model"
 	"goauth/internal/service"
+	"goauth/internal/util"
 	"goauth/tests/helper"
 )
 
@@ -243,10 +244,10 @@ func TestSession_TerminateSpecificSession(t *testing.T) {
 	require.NoError(t, err)
 	require.GreaterOrEqual(t, len(sessions), 2)
 
-	// 找到 token2 对应的会话
+	// 找到 token2 对应的会话（数据库中 token 存储为 SHA-256 哈希）
 	var session2ID string
 	for _, s := range sessions {
-		if s.Token == token2 {
+		if s.Token == util.HashToken(token2) {
 			session2ID = s.ID
 			break
 		}
@@ -292,11 +293,12 @@ func TestSession_TerminateAllOtherSessions(t *testing.T) {
 	}
 
 	// 使用 repo 直接删除其他会话（模拟终止操作）
+	// 数据库中 token 存储为 SHA-256 哈希，比较时需先哈希
 	sessions, err := server.SessionRepo.FindByUserID(context.Background(), user.ID)
 	require.NoError(t, err)
 
 	for _, s := range sessions {
-		if s.Token != tokens[0] {
+		if s.Token != util.HashToken(tokens[0]) {
 			err = server.SessionRepo.Delete(context.Background(), s.ID)
 			require.NoError(t, err)
 		}

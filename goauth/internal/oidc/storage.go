@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"errors"
+	"strings"
 	"sync"
 	"time"
 
@@ -21,6 +22,7 @@ import (
 	"goauth/internal/config"
 	"goauth/internal/model"
 	"goauth/internal/repo"
+	"goauth/internal/util"
 )
 
 var (
@@ -40,8 +42,9 @@ type Storage struct {
 	sessionRepo *repo.SessionRepo // 添加 sessionRepo 用于 SSO 登出
 	cfg         *config.Config
 	key         *rsa.PrivateKey
-	keyOnce     sync.Once  // 确保 initSigningKey 只执行一次
-	keyInitErr  error      // 存储初始化错误
+	keyID       string    // 签名密钥 ID（来自 DB，支持平滑轮换）
+	keyOnce     sync.Once // 确保 initSigningKey 只执行一次
+	keyInitErr  error     // 存储初始化错误
 }
 
 // NewStorage 创建 Storage
@@ -74,9 +77,13 @@ func (s *Storage) doInitSigningKey(ctx context.Context) error {
 	existingKeys, err := s.keyRepo.FindValidByType(ctx, "oidc_signing_key")
 	if err == nil && len(existingKeys) > 0 {
 		latestKey := existingKeys[0]
-		key, err := parseRSAKey(latestKey.Value)
+		// 尝试解密后解析
+		decryptedValue := s.decryptPayload(latestKey.Value)
+		key, err := parseRSAKey(decryptedValue)
 		if err == nil {
 			s.key = key
+			// 使用 DB 中的密钥记录 ID 作为签名 key ID，支持平滑轮换
+			s.keyID = latestKey.ID
 			return nil
 		}
 		log.Warn().Err(err).Msg("Failed to load existing signing key, generating new one")
@@ -88,8 +95,10 @@ func (s *Storage) doInitSigningKey(ctx context.Context) error {
 		return err
 	}
 	s.key = key
+	// 新密钥 ID 暂为空，持久化成功后回填
+	s.keyID = ""
 
-	// 持久化密钥到数据库
+	// 持久化密钥到数据库（加密后存储）
 	keyPEM, err := encodeRSAKey(key)
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to encode signing key")
@@ -98,14 +107,29 @@ func (s *Storage) doInitSigningKey(ctx context.Context) error {
 
 	newKey := &model.Key{
 		Type:      "oidc_signing_key",
-		Value:     keyPEM,
+		Value:     s.encryptPayload(keyPEM),
 		ExpiresAt: model.CustomTime{Time: time.Now().Add(365 * 24 * time.Hour)},
 	}
 	if err := s.keyRepo.Create(ctx, newKey); err != nil {
 		log.Error().Err(err).Msg("Failed to persist signing key")
+	} else {
+		s.keyID = newKey.ID
 	}
 
 	return nil
+}
+
+// signingKeyID 返回当前签名密钥 ID；兜底 "key-1"（兼容历史数据/内存密钥）
+func (s *Storage) signingKeyID() string {
+	if s.keyID != "" {
+		return s.keyID
+	}
+	return "key-1"
+}
+
+// SigningKeyIDForTest 暴露当前签名密钥 ID（仅供测试）
+func (s *Storage) SigningKeyIDForTest() string {
+	return s.signingKeyID()
 }
 
 // parseRSAKey 解析 PEM 编码的 RSA 私钥
@@ -195,12 +219,17 @@ func (s *Storage) GetClientByClientID(ctx context.Context, clientID string) (op.
 		}
 	}
 
+	var postLogoutURIs []string
+	if dbClient.PostLogoutURIs != "" {
+		json.Unmarshal([]byte(dbClient.PostLogoutURIs), &postLogoutURIs)
+	}
+
 	return &Client{
 		ID_:                     dbClient.ID,
 		Secret_:                 ptrToString(dbClient.Secret),
 		Name_:                   dbClient.Name,
 		RedirectURIs_:           redirectURIs,
-		PostLogoutRedirectURIs_: []string{},
+		PostLogoutRedirectURIs_: postLogoutURIs,
 		ApplicationType_:        op.ApplicationTypeWeb,
 		ResponseTypes_:          responseTypes,
 		GrantTypes_:             grantTypes,
@@ -315,7 +344,7 @@ func (s *Storage) CreateAuthRequest(ctx context.Context, authReq *oidc.AuthReque
 	oidcPayload := &model.OIDCPayload{
 		ID:        req.ID,
 		Type:      "auth_request",
-		Payload:   string(payload),
+		Payload:   s.encryptPayload(string(payload)),
 		AccountID: &userID,
 		ExpiresAt: ptrCustomTime(time.Now().Add(15 * time.Minute)),
 	}
@@ -335,7 +364,7 @@ func (s *Storage) AuthRequestByID(ctx context.Context, id string) (op.AuthReques
 	}
 
 	var req AuthRequest
-	if err := json.Unmarshal([]byte(payload.Payload), &req); err != nil {
+	if err := json.Unmarshal([]byte(s.decryptPayload(payload.Payload)), &req); err != nil {
 		return nil, err
 	}
 
@@ -355,7 +384,7 @@ func (s *Storage) AuthRequestByCode(ctx context.Context, code string) (op.AuthRe
 	}
 
 	var req AuthRequest
-	if err := json.Unmarshal([]byte(payload.Payload), &req); err != nil {
+	if err := json.Unmarshal([]byte(s.decryptPayload(payload.Payload)), &req); err != nil {
 		return nil, err
 	}
 
@@ -396,7 +425,7 @@ func (s *Storage) CompleteAuthRequest(ctx context.Context, authRequestID, userID
 	}
 
 	var req AuthRequest
-	if err := json.Unmarshal([]byte(payload.Payload), &req); err != nil {
+	if err := json.Unmarshal([]byte(s.decryptPayload(payload.Payload)), &req); err != nil {
 		return err
 	}
 
@@ -409,7 +438,7 @@ func (s *Storage) CompleteAuthRequest(ctx context.Context, authRequestID, userID
 		return err
 	}
 
-	payload.Payload = string(updatedPayload)
+	payload.Payload = s.encryptPayload(string(updatedPayload))
 	payload.AccountID = &userID
 
 	return s.oidcRepo.Update(ctx, payload)
@@ -437,7 +466,7 @@ func (s *Storage) CreateAccessToken(ctx context.Context, req op.TokenRequest) (s
 	oidcPayload := &model.OIDCPayload{
 		ID:        tokenID,
 		Type:      "access_token",
-		Payload:   string(payload),
+		Payload:   s.encryptPayload(string(payload)),
 		AccountID: ptrString(req.GetSubject()),
 		ExpiresAt: ptrCustomTime(exp),
 	}
@@ -478,7 +507,7 @@ func (s *Storage) CreateAccessAndRefreshTokens(ctx context.Context, req op.Token
 	oidcPayload := &model.OIDCPayload{
 		ID:        refreshToken,
 		Type:      "refresh_token",
-		Payload:   string(payload),
+		Payload:   s.encryptPayload(string(payload)),
 		AccountID: ptrString(req.GetSubject()),
 		ExpiresAt: ptrCustomTime(refreshExp),
 	}
@@ -499,7 +528,7 @@ func (s *Storage) TokenRequestByRefreshToken(ctx context.Context, refreshToken s
 	}
 
 	var token AccessToken
-	if err := json.Unmarshal([]byte(payload.Payload), &token); err != nil {
+	if err := json.Unmarshal([]byte(s.decryptPayload(payload.Payload)), &token); err != nil {
 		return nil, err
 	}
 
@@ -514,7 +543,7 @@ func (s *Storage) TokenRequestByRefreshToken(ctx context.Context, refreshToken s
 
 // SigningKey 获取签名密钥
 func (s *Storage) SigningKey(ctx context.Context) (op.SigningKey, error) {
-	return &SigningKey{key: s.key}, nil
+	return &SigningKey{id: s.signingKeyID(), key: s.key}, nil
 }
 
 // SignatureAlgorithms 获取签名算法
@@ -525,7 +554,7 @@ func (s *Storage) SignatureAlgorithms(ctx context.Context) ([]jose.SignatureAlgo
 // KeySet 获取密钥集
 func (s *Storage) KeySet(ctx context.Context) ([]op.Key, error) {
 	return []op.Key{
-		&PublicKey{id: "key-1", key: &s.key.PublicKey},
+		&PublicKey{id: s.signingKeyID(), key: &s.key.PublicKey},
 	}, nil
 }
 
@@ -582,7 +611,7 @@ func (s *Storage) GetRefreshTokenInfo(ctx context.Context, clientID string, toke
 	}
 
 	var tokenData AccessToken
-	if err := json.Unmarshal([]byte(payload.Payload), &tokenData); err != nil {
+	if err := json.Unmarshal([]byte(s.decryptPayload(payload.Payload)), &tokenData); err != nil {
 		return "", "", err
 	}
 
@@ -606,7 +635,19 @@ func (a *AuthRequest) GetAMR() []string                     { return []string{"p
 func (a *AuthRequest) GetAudience() []string                { return []string{a.ClientID} }
 func (a *AuthRequest) GetAuthTime() time.Time               { return a.AuthTime }
 func (a *AuthRequest) GetClientID() string                  { return a.ClientID }
-func (a *AuthRequest) GetCodeChallenge() *oidc.CodeChallenge { return nil }
+func (a *AuthRequest) GetCodeChallenge() *oidc.CodeChallenge {
+	if a.CodeChallenge == "" {
+		return nil
+	}
+	method := oidc.CodeChallengeMethodPlain
+	if strings.EqualFold(string(a.CodeChallengeMethod), "S256") {
+		method = oidc.CodeChallengeMethodS256
+	}
+	return &oidc.CodeChallenge{
+		Challenge: a.CodeChallenge,
+		Method:    method,
+	}
+}
 func (a *AuthRequest) GetNonce() string                     { return a.Nonce }
 func (a *AuthRequest) GetRedirectURI() string               { return a.RedirectURI }
 func (a *AuthRequest) GetResponseType() oidc.ResponseType   { return a.ResponseType }
@@ -641,10 +682,11 @@ func (r *RefreshToken) SetCurrentScopes(scopes []string) {}
 
 // SigningKey 签名密钥
 type SigningKey struct {
+	id  string
 	key *rsa.PrivateKey
 }
 
-func (s *SigningKey) ID() string                            { return "key-1" }
+func (s *SigningKey) ID() string                            { return s.id }
 func (s *SigningKey) Key() interface{}                      { return s.key }
 func (s *SigningKey) SignatureAlgorithm() jose.SignatureAlgorithm { return jose.RS256 }
 
@@ -710,7 +752,7 @@ func (c *Client) IsScopeAllowed(scope string) bool {
 }
 func (c *Client) IDTokenUserinfoClaimsAssertion() bool { return false }
 func (c *Client) ClockSkew() time.Duration              { return c.ClockSkew_ }
-func (c *Client) IDTokenSigningKeyID() string           { return "key-1" }
+func (c *Client) IDTokenSigningKeyID() string           { return "key-1" } // 由 provider 层用 Storage.signingKeyID() 覆盖签发 kid
 
 // 辅助函数
 func generateID() (string, error) {
@@ -738,4 +780,30 @@ func ptrStringStr(s *string) string {
 		return ""
 	}
 	return *s
+}
+
+// encryptPayload AES-256-GCM 加密 payload，加密失败返回原始值（保持向后兼容）
+func (s *Storage) encryptPayload(plaintext string) string {
+	if len(s.cfg.Security.CryptoKey) == 0 {
+		return plaintext
+	}
+	encrypted, err := util.Encrypt(plaintext, s.cfg.Security.CryptoKey)
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to encrypt payload, storing plaintext")
+		return plaintext
+	}
+	return encrypted
+}
+
+// decryptPayload AES-256-GCM 解密 payload，解密失败返回原始值（保持向后兼容）
+func (s *Storage) decryptPayload(ciphertext string) string {
+	if len(s.cfg.Security.CryptoKey) == 0 {
+		return ciphertext
+	}
+	decrypted, err := util.Decrypt(ciphertext, s.cfg.Security.CryptoKey)
+	if err != nil {
+		// 如果解密失败，可能是旧数据（明文存储），直接返回原始值
+		return ciphertext
+	}
+	return decrypted
 }

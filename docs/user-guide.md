@@ -12,14 +12,6 @@
 
 如果用户因全局策略、组成员身份或所访问的 OIDC 应用或 ProxyAuth 域名的安全策略需要 MFA，则会被引导至多因素认证页面。如果用户账户上没有可用的 MFA 方式但需要 MFA，他们将有机会在此页面上设置一个。
 
-<p align=center>
-<img src="/public/screenshots/mfa-required.png" width="375" alt="MFA 验证页面" />
-</p>
-
-<p align=center>
-<img src="/public/screenshots/mfa-register.png" width="375" alt="MFA 注册页面" />
-</p>
-
 ## 注册
 
 如果 **APP_UI_SIGNUPENABLED** 环境变量设置为 `true`，[登录](#登录)页面上将显示注册选项。用户名是必填项。密码强度要求由 **APP_SECURITY_PASSWORDMINSCORE** 环境变量设置。密码强度使用 [zxcvbn](https://github.com/nbutton23/zxcvbn-go) 计算。

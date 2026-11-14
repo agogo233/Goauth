@@ -73,8 +73,8 @@ test.describe('普通用户权限限制', () => {
       return;
     }
     
-    const loginData = await loginResponse.json();
-    const sessionToken = loginData.token;
+    // token 改为 HttpOnly cookie 下发，从 Set-Cookie 提取
+    const sessionToken = loginResponse.headers().get("set-cookie")?.match(/session=([^;]+)/)?.[1] || "";
     
     // 尝试访问管理员 API
     const response = await request.get('/api/admin/users', {

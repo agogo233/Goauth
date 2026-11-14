@@ -10,6 +10,7 @@ import (
 
 	"goauth/internal/model"
 	"goauth/internal/service"
+	"goauth/internal/util"
 	"goauth/tests/helper"
 )
 
@@ -181,7 +182,8 @@ func TestCleanup_ExpiredSessions(t *testing.T) {
 	sessions, err = server.SessionRepo.FindByUserID(context.Background(), user.ID)
 	require.NoError(t, err)
 	assert.Equal(t, 1, len(sessions))
-	assert.Equal(t, "valid-token", sessions[0].Token)
+	// 数据库中 token 存储为 SHA-256 哈希
+	assert.Equal(t, util.HashToken("valid-token"), sessions[0].Token)
 }
 
 // ========== 过期邀请清理测试 ==========

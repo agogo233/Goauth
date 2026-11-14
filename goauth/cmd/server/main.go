@@ -115,7 +115,7 @@ func runServe(cmd *cobra.Command, args []string) {
 	setupLogging(cfg.Logging.Level)
 
 	// Connect to database
-	database, err := db.New(&cfg.Database)
+	database, err := db.NewWithTimezone(&cfg.Database, cfg.Server.Timezone)
 	if err != nil {
 		log.Fatal().Err(err).Msg("Failed to connect to database")
 	}
@@ -153,7 +153,7 @@ func runServe(cmd *cobra.Command, args []string) {
 	}
 
 	// Setup services
-	protector := util.NewBruteForceProtector(database.DB, cfg.Security.LoginMaxAttempts, cfg.Security.LoginBlockDuration)
+	protector := util.NewBruteForceProtector(database.DB, cfg.Security.LoginMaxAttempts, cfg.Security.LoginBlockDuration, cfg.Security.TotpMaxAttempts)
 	totpService := service.NewTotpService(database.DB, cfg)
 	invitationService := service.NewInvitationService(invitationRepo, groupRepo, database.DB)
 	authService := service.NewAuthService(userRepo, sessionRepo, groupRepo, totpService, invitationService, protector, cfg)
@@ -165,7 +165,7 @@ func runServe(cmd *cobra.Command, args []string) {
 	healthHandler := handler.NewHealthHandler()
 	publicHandler := handler.NewPublicHandler(cfg)
 	authHandler := handler.NewAuthHandler(authService, userService, auditService, cfg)
-	userHandler := handler.NewUserHandler(userService, totpService, sessionRepo, cfg)
+	userHandler := handler.NewUserHandler(userService, totpService, sessionRepo, auditService, cfg)
 	adminHandler := handler.NewAdminHandler(userService, groupService, auditService, invitationService, totpService, userRepo, groupRepo, clientRepo, invitationRepo, proxyAuthRepo)
 	oidcHandler := handler.NewOIDCHandler(provider)
 	proxyAuthHandler := handler.NewProxyAuthHandler(authService, proxyAuthRepo, groupRepo, sessionRepo)
@@ -247,7 +247,7 @@ func runMigrate(cmd *cobra.Command, args []string) {
 	setupLogging(cfg.Logging.Level)
 
 	// Connect to database
-	database, err := db.New(&cfg.Database)
+	database, err := db.NewWithTimezone(&cfg.Database, cfg.Server.Timezone)
 	if err != nil {
 		log.Fatal().Err(err).Msg("Failed to connect to database")
 	}
@@ -274,7 +274,7 @@ func runResetPassword(cmd *cobra.Command, args []string) {
 	setupLogging(cfg.Logging.Level)
 
 	// Connect to database
-	database, err := db.New(&cfg.Database)
+	database, err := db.NewWithTimezone(&cfg.Database, cfg.Server.Timezone)
 	if err != nil {
 		log.Fatal().Err(err).Msg("Failed to connect to database")
 	}
@@ -296,7 +296,7 @@ func runResetPassword(cmd *cobra.Command, args []string) {
 	}
 
 	// Hash password
-	hashedPassword, err := util.HashPassword(newPassword)
+	hashedPassword, err := util.HashPasswordWithCost(newPassword, cfg.Security.BcryptCost)
 	if err != nil {
 		log.Fatal().Err(err).Msg("Failed to hash password")
 	}
@@ -307,8 +307,10 @@ func runResetPassword(cmd *cobra.Command, args []string) {
 		log.Fatal().Err(err).Msg("Failed to update password")
 	}
 
+	// 不在 stdout 输出新密码明文（进程列表/日志可能被收集）；
+	// 需要查看时通过 debug 日志级别获取
 	fmt.Printf("Password reset for user '%s'\n", resetUsername)
-	fmt.Printf("New password: %s\n", newPassword)
+	log.Debug().Str("username", resetUsername).Msg("New password generated")
 	log.Info().Str("username", resetUsername).Msg("Password reset successfully")
 }
 
@@ -325,7 +327,7 @@ func runCreateAdmin(cmd *cobra.Command, args []string) {
 	setupLogging(cfg.Logging.Level)
 
 	// Connect to database
-	database, err := db.New(&cfg.Database)
+	database, err := db.NewWithTimezone(&cfg.Database, cfg.Server.Timezone)
 	if err != nil {
 		log.Fatal().Err(err).Msg("Failed to connect to database")
 	}
@@ -346,7 +348,7 @@ func runCreateAdmin(cmd *cobra.Command, args []string) {
 	}
 
 	// Hash password
-	hashedPassword, err := util.HashPassword(adminPassword)
+	hashedPassword, err := util.HashPasswordWithCost(adminPassword, cfg.Security.BcryptCost)
 	if err != nil {
 		log.Fatal().Err(err).Msg("Failed to hash password")
 	}
@@ -409,6 +411,9 @@ func setupRouter(
 	router.Use(gin.Recovery())
 	router.Use(gin.Logger())
 
+	// 请求级超时：防止慢查询/下游阻塞长期占用连接
+	router.Use(middleware.RequestTimeout(30 * time.Second))
+
 	// 安全响应头
 	router.Use(middleware.SecurityHeaders())
 
@@ -455,12 +460,11 @@ func setupRouter(
 			api.Use(middleware.RateLimit(rateLimiter))
 		}
 
-		// CSRF 保护（跳过登录、注册和登出端点）
+		// CSRF 保护（跳过登录、注册端点；登出必须携带 CSRF token）
 		api.Use(middleware.CSRF(middleware.CSRFConfig{
 			SkipPaths: []string{
 				"/api/auth/login",
 				"/api/auth/register",
-				"/api/auth/logout",
 				"/api/public/password-strength", // 公开API，不需要CSRF保护
 			},
 		}))
@@ -555,6 +559,13 @@ func setupRouter(
 
 	// OIDC routes - handle all OIDC endpoints through the provider
 	// 路径必须与 OIDC discovery 文档中的路径一致
+	//
+	// CSRF 防护说明：OIDC 端点不使用站点 cookie-CSRF 保护：
+	//   - /authorize、/endsession 是客户端应用发起的跨站浏览器导航，无法携带本站 CSRF token，
+	//     其防 CSRF 依赖 OAuth2 `state` 参数，以及 endsession 的 post_logout_redirect_uri 注册精确校验；
+	//   - /oauth/token、/oauth/introspect、/revoke 为服务器间调用，由 client_secret / PKCE 保护；
+	//   - /userinfo 由 Bearer access token 保护。
+	// 请勿对这些端点添加 cookie-CSRF 中间件，否则会阻断标准 OIDC 流程。
 	oidcRouter := router.Group("")
 	{
 		oidcRouter.GET("/.well-known/openid-configuration", oidcHandler.Handler())

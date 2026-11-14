@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"goauth/internal/config"
+	dbpkg "goauth/internal/db"
 	"goauth/internal/model"
 	"goauth/internal/repo"
 	"goauth/internal/util"
@@ -23,52 +24,8 @@ func setupUserTestDB(t *testing.T) *sqlx.DB {
 	db, err := sqlx.Open("sqlite3", ":memory:?_foreign_keys=on")
 	require.NoError(t, err, "Failed to open test database")
 
-	schema := `
-	CREATE TABLE IF NOT EXISTS users (
-		id TEXT PRIMARY KEY,
-		email TEXT UNIQUE,
-		username TEXT UNIQUE NOT NULL,
-		name TEXT,
-		passwordHash TEXT,
-		isAdmin INTEGER DEFAULT 0,
-		emailVerified INTEGER DEFAULT 0,
-		approved INTEGER DEFAULT 0,
-		mfaRequired INTEGER DEFAULT 0,
-		disabled INTEGER DEFAULT 0,
-		createdAt TEXT NOT NULL,
-		updatedAt TEXT NOT NULL
-	);
-	CREATE TABLE IF NOT EXISTS sessions (
-		id TEXT PRIMARY KEY,
-		userId TEXT NOT NULL,
-		token TEXT NOT NULL UNIQUE,
-		amr TEXT,
-		rememberMe INTEGER DEFAULT 0,
-		expiresAt TEXT NOT NULL,
-		createdAt TEXT NOT NULL,
-		FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE
-	);
-	CREATE TABLE IF NOT EXISTS groups (
-		id TEXT PRIMARY KEY,
-		name TEXT UNIQUE NOT NULL,
-		mfaRequired INTEGER DEFAULT 0,
-		createdBy TEXT NOT NULL,
-		createdAt TEXT NOT NULL,
-		updatedAt TEXT NOT NULL
-	);
-	CREATE TABLE IF NOT EXISTS user_groups (
-		userId TEXT NOT NULL,
-		groupId TEXT NOT NULL,
-		createdAt TEXT NOT NULL,
-		PRIMARY KEY (userId, groupId),
-		FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE,
-		FOREIGN KEY (groupId) REFERENCES groups(id) ON DELETE CASCADE
-	);
-	CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token);
-	CREATE INDEX IF NOT EXISTS idx_sessions_userId ON sessions(userId);
-	`
-	_, err = db.Exec(schema)
-	require.NoError(t, err, "Failed to create schema")
+	// 复用生产迁移，保证测试与生产 schema 一致
+	require.NoError(t, dbpkg.RunMigrations(db), "Failed to run migrations")
 
 	t.Cleanup(func() {
 		db.Close()

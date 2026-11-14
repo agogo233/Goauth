@@ -61,14 +61,21 @@ volumes:
 | `APP_SERVER_HOST` | 监听地址 | `0.0.0.0` |
 | `APP_SERVER_ENVIRONMENT` | 环境 (development/production) | `development` |
 | `APP_SERVER_APPURL` | 应用 URL | - |
+| `APP_SERVER_BASEPATH` | 子路径部署（如 `/auth`） | `""` |
 | `APP_SERVER_TIMEZONE` | 时区 | `UTC` |
+| `APP_SERVER_COOKIEDOMAIN` | Cookie 域名 | 自动从 APPURL 提取 |
 | `APP_SERVER_COOKIESECURE` | Cookie Secure (auto/true/false) | `auto` |
 | `APP_SERVER_COOKIESAMESITE` | Cookie SameSite (strict/lax/none) | `lax` |
+| `APP_SERVER_CORSALLOWORIGINS` | CORS 允许来源（逗号分隔） | 空（仅同源；development 下为 `*`） |
 | `APP_SERVER_RATELIMIT` | 速率限制（次/分钟，0=禁用） | `100` |
 | `APP_DATABASE_PATH` | SQLite 数据库路径 | `./data/goauth.db` |
 | `APP_OIDC_ISSUER` | OIDC Issuer URL | 自动使用 APP_SERVER_APPURL |
-| `APP_SESSION_TTL` | 普通 Session 有效期（小时） | `24` |
-| `APP_SESSION_TTLREMEMBER` | "记住我" Session 有效期（小时） | `720` |
+| `APP_OIDC_ACCESSTOKENTTL` | Access Token 有效期 | `15m` |
+| `APP_OIDC_IDTOKENTTL` | ID Token 有效期 | `30m` |
+| `APP_OIDC_REFRESHTOKENTTL` | Refresh Token 有效期 | `168h` (7天) |
+| `APP_OIDC_SESSIONTTL` | OIDC Session 有效期 | `720h` (30天) |
+| `APP_SESSION_TTL` | 普通 Session 有效期 | `24h` |
+| `APP_SESSION_TTLREMEMBER` | "记住我" Session 有效期 | `720h` (30天) |
 | `APP_UI_APPNAME` | 应用名称 | `Goauth` |
 | `APP_UI_APPCOLOR` | 主题颜色 | `#906bc7` |
 | `APP_UI_SIGNUPENABLED` | 开放注册 | `true` |
@@ -78,7 +85,14 @@ volumes:
 | `APP_SECURITY_LOGINBLOCKDURATION` | 封禁时长 (分钟) | `30` |
 | `APP_SECURITY_TOTPMAXATTEMPTS` | TOTP 最大尝试次数 | `5` |
 | `APP_SECURITY_AUDITLOGRETENTION` | 审计日志保留天数 | `90` |
+| `APP_SECURITY_LOGINATTEMPTCLEANUP` | 登录尝试记录清理间隔 (小时) | `24` |
+| `APP_SECURITY_AUTOAPPROVEUSERS` | 自动批准所有注册用户（测试用） | `false` |
+| `APP_SECURITY_CRYPTOKEY` | AES-256-GCM 加密密钥（32字节 base64，自动生成则无需设置） | 自动生成 |
 | `APP_LOGGING_LEVEL` | 日志级别 | `info` |
+
+> 时长类变量支持 Go duration 格式（如 `15m`、`24h`、`720h`）；纯数字会被解析为纳秒，请务必带单位。
+
+> **⚠️ 密钥文件**：首次启动自动生成 `./data/.goauth-keys`，包含 `cryptoKey`（AES 密钥）和 `cookieKeys`（会话签名密钥）。**此文件不可丢失**——删除后已加密数据（OIDC Token、RSA 私钥）将无法解密。可通过 `APP_SECURITY_CRYPTOKEY` 环境变量预置密钥。
 
 ### 配置文件
 
@@ -149,7 +163,7 @@ services:
     image: myapp
     labels:
       - "traefik.http.middlewares.goauth.forwardauth.address=http://goauth:3000/authz/forward-auth"
-      - "traefik.http.middlewares.goauth.forwardauth.authResponseHeaders=X-Auth-User,X-Auth-Email"
+      - "traefik.http.middlewares.goauth.forwardauth.authResponseHeaders=X-User-Id,X-User-Name,X-User-Email"
       - "traefik.http.routers.app.middlewares=goauth@docker"
 ```
 
@@ -159,8 +173,12 @@ services:
 server {
     location / {
         auth_request /authz;
-        auth_request_set $user $upstream_http_x_auth_user;
-        proxy_set_header X-Auth-User $user;
+        auth_request_set $user_id $upstream_http_x_user_id;
+        auth_request_set $user_name $upstream_http_x_user_name;
+        auth_request_set $user_email $upstream_http_x_user_email;
+        proxy_set_header X-User-Id $user_id;
+        proxy_set_header X-User-Name $user_name;
+        proxy_set_header X-User-Email $user_email;
         proxy_pass http://app;
     }
 
@@ -208,11 +226,12 @@ goauth/
 
 ## 安全特性
 
-- **密码哈希** - bcrypt (cost=10)
+- **密码哈希** - bcrypt (默认 cost=12，可通过 `APP_SECURITY_BCRYPTCOST` 配置)
 - **密码强度** - zxcvbn 检测
 - **暴力破解防护** - 失败次数限制 + IP 封禁
-- **会话管理** - 安全 Cookie，支持"记住我"
-- **加密存储** - 敏感数据加密存储
+- **会话管理** - 安全 Cookie + session token SHA-256 哈希存储
+- **数据加密** - AES-256-GCM 加密 OIDC Token 和 RSA 私钥
+- **审计日志** - 关键操作记录
 
 ## 功能概览
 

@@ -155,7 +155,7 @@ func (s *TotpService) GenerateBackupCodes(ctx context.Context, userID string) ([
 		codes[i] = fmt.Sprintf("%s-%s",
 			base64.RawURLEncoding.EncodeToString(b[:2]),
 			base64.RawURLEncoding.EncodeToString(b[2:]))
-		hash, err := util.HashPassword(codes[i])
+		hash, err := util.HashPasswordWithCost(codes[i], s.cfg.Security.BcryptCost)
 		if err != nil {
 			return nil, err
 		}

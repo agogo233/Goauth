@@ -193,7 +193,7 @@ test.describe('CSRF 豁免路径', () => {
     expect([200, 201, 400]).toContain(response.status());
   });
 
-  test('登出接口不需要 CSRF Token', async ({ authenticatedPage: page, request }) => {
+  test('登出接口需要 CSRF Token', async ({ authenticatedPage: page, request }) => {
     await expect(page.locator('h1:has-text("管理后台")')).toBeVisible({ timeout: 5000 });
 
     const context = page.context();
@@ -212,8 +212,8 @@ test.describe('CSRF 豁免路径', () => {
       },
     });
 
-    // 应该成功
-    expect([200, 401]).toContain(response.status());
+    // 缺少 CSRF token 应被拒绝
+    expect(response.status()).toBe(403);
   });
 });
 

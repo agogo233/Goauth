@@ -1,5 +1,8 @@
 # Goauth 版本计划
 
+> [!NOTE]
+> 本文档为项目初始设计规划，保留作历史参考。实际实现可能与本文档存在差异，请以代码和 `docs/` 目录下的文档为准。
+
 ## 概述
 
 Goauth 是一个精简的 OIDC Provider，专注于核心功能，减少依赖和构建体积。
@@ -48,9 +51,11 @@ goauth/
 │   │   ├── health.go               # 健康检查
 │   │   └── interaction.go          # OIDC交互
 │   ├── middleware/
-│   │   ├── auth.go                 # JWT认证
+│   │   ├── auth.go                 # 会话认证
 │   │   ├── rate_limit.go           # 速率限制
-│   │   └── cors.go                 # CORS
+│   │   ├── cors.go                 # CORS
+│   │   ├── csrf.go                 # CSRF 防护
+│   │   └── security_headers.go     # 安全响应头/CSP
 │   ├── model/
 │   │   └── models.go               # 数据模型
 │   ├── oidc/
@@ -150,6 +155,7 @@ github.com/google/uuid                // UUID生成
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | GET | `/health` | 健康检查 |
+| GET | `/ready` | 就绪检查 |
 | GET | `/api/public/config` | 公开配置 |
 | POST | `/api/public/password-strength` | 密码强度检查 |
 
@@ -157,21 +163,23 @@ github.com/google/uuid                // UUID生成
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | POST | `/api/auth/login` | 登录（body: `{username, password, rememberMe}`） |
-| POST | `/api/auth/register` | 注册（支持邀请码） |
-| POST | `/api/auth/totp` | TOTP验证 |
+| POST | `/api/auth/register` | 注册（支持邀请码，首个用户自动成为管理员） |
+| POST | `/api/auth/totp` | TOTP 验证 |
 | POST | `/api/auth/logout` | 登出 |
 
 ### OIDC端点
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | GET | `/.well-known/openid-configuration` | Discovery |
-| GET | `/jwks` | JWKS |
-| GET | `/authorize` | 授权（自动授权） |
-| POST | `/token` | Token |
-| GET | `/userinfo` | UserInfo |
-| POST | `/introspect` | 内省 |
+| GET | `/keys` | JWKS |
+| GET, POST | `/authorize` | 授权（自动授权） |
+| POST | `/oauth/token`（兼容 `/token`） | Token |
+| GET, POST | `/userinfo` | UserInfo |
+| POST | `/oauth/introspect`（兼容 `/introspect`） | 内省 |
 | POST | `/revoke` | 撤销 |
 | GET, POST | `/endsession` | 登出 |
+| GET | `/interaction` | OIDC 交互（已登录用户自动完成授权） |
+| ANY | `/api/cb` | OIDC 回调 |
 
 ### 用户端点（需登录）
 | 方法 | 路径 | 说明 |
@@ -179,8 +187,18 @@ github.com/google/uuid                // UUID生成
 | GET | `/api/user/me` | 当前用户信息 |
 | PATCH | `/api/user/profile` | 更新资料 |
 | PATCH | `/api/user/password` | 修改密码 |
-| POST | `/api/user/totp/setup` | 设置TOTP（返回 `{uri, qrBase64}`） |
+| GET | `/api/user/sessions` | 会话列表 |
+| DELETE | `/api/user/sessions/:id` | 终止指定会话 |
+| GET | `/api/user/totp/backup-codes` | 生成 TOTP 备用码 |
+| POST | `/api/user/totp/verify-backup-code` | 校验 TOTP 备用码 |
 | DELETE | `/api/user/totp` | 移除TOTP |
+
+### MFA 设置端点（待设置 MFA 的用户可访问）
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/mfa-setup/me` | 当前用户信息 |
+| POST | `/api/mfa-setup/totp/setup` | 设置TOTP（返回 `{uri, qrBase64}`） |
+| POST | `/api/mfa-setup/totp/verify` | 验证并启用 TOTP |
 
 ### 管理端点（需管理员）
 
@@ -194,6 +212,8 @@ github.com/google/uuid                // UUID生成
 | POST | `/api/admin/users/:id/disable` | 禁用用户 |
 | POST | `/api/admin/users/:id/enable` | 启用用户 |
 | POST | `/api/admin/users/:id/reset-password` | 重置密码 |
+| POST | `/api/admin/users/:id/admin` | 设置/取消管理员 |
+| DELETE | `/api/admin/users/:id/totp` | 移除用户TOTP |
 | DELETE | `/api/admin/users/:id` | 删除用户 |
 
 #### 分组管理
@@ -203,6 +223,7 @@ github.com/google/uuid                // UUID生成
 | POST | `/api/admin/groups` | 创建分组 |
 | PATCH | `/api/admin/groups/:id` | 更新分组 |
 | DELETE | `/api/admin/groups/:id` | 删除分组 |
+| GET | `/api/admin/groups/:id/members` | 分组成员列表 |
 | POST | `/api/admin/groups/:id/members` | 添加成员 |
 | DELETE | `/api/admin/groups/:id/members/:userId` | 移除成员 |
 
@@ -221,13 +242,18 @@ github.com/google/uuid                // UUID生成
 | POST | `/api/admin/invitations` | 创建邀请 |
 | DELETE | `/api/admin/invitations/:id` | 删除邀请 |
 
-#### ProxyAuth管理
+            # ProxyAuth管理
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | GET | `/api/admin/proxy-auth` | ProxyAuth列表 |
 | POST | `/api/admin/proxy-auth` | 创建ProxyAuth |
 | PATCH | `/api/admin/proxy-auth/:id` | 更新ProxyAuth |
 | DELETE | `/api/admin/proxy-auth/:id` | 删除ProxyAuth |
+
+#### 审计日志
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/admin/audit-logs` | 审计日志列表 |
 
 ### ProxyAuth端点
 | 方法 | 路径 | 说明 |
@@ -568,7 +594,7 @@ logging:
 ## 安全设计
 
 ### 密码
-- 使用 bcrypt 哈希（cost=12）
+- 使用 bcrypt 哈希（cost 可配置，默认 12）
 - 使用 zxcvbn 检测密码强度
 - 最小长度可配置（默认8）
 - 最小强度分数可配置（默认3）
@@ -583,8 +609,9 @@ logging:
 ### 会话管理
 - Session存储在SQLite独立表
 - 支持多设备登录
-- 可配置TTL（默认90天）
-- **"记住我"功能**：勾选后 Session TTL 延长至 30 天，不勾选默认 24 小时
+- 普通登录 Session TTL 可配置（默认24小时），"记住我" Session TTL 可配置（默认30天）
+- OIDC Session TTL 可配置（默认90天）
+- 登录后的每次请求会滑动续期 Session
 - 登出时主动删除Session
 
 ### 存储加密

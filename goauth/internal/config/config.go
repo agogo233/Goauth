@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -39,15 +40,15 @@ type SessionConfig struct {
 }
 
 type ServerConfig struct {
-	Port            int      `koanf:"port"`
-	Host            string   `koanf:"host"`
-	Environment     string   `koanf:"environment"`
-	AppURL          string   `koanf:"appurl"`
-	BasePath        string   `koanf:"basepath"`
-	Timezone        string   `koanf:"timezone"`
-	CookieDomain    string   `koanf:"cookiedomain"`
-	CookieSecure    string   `koanf:"cookiesecure"`   // "auto", "true", "false"
-	CookieSameSite  string   `koanf:"cookiesamesite"` // "strict", "lax", "none"
+	Port             int      `koanf:"port"`
+	Host             string   `koanf:"host"`
+	Environment      string   `koanf:"environment"`
+	AppURL           string   `koanf:"appurl"`
+	BasePath         string   `koanf:"basepath"`
+	Timezone         string   `koanf:"timezone"`
+	CookieDomain     string   `koanf:"cookiedomain"`
+	CookieSecure     string   `koanf:"cookiesecure"`     // "auto", "true", "false"
+	CookieSameSite   string   `koanf:"cookiesamesite"`   // "strict", "lax", "none"
 	CORSAllowOrigins []string `koanf:"corsalloworigins"` // CORS 允许的来源列表
 }
 
@@ -56,27 +57,28 @@ type DatabaseConfig struct {
 }
 
 type OIDCConfig struct {
-	Issuer         string        `koanf:"issuer"`
-	CookieKeys     []string      `koanf:"cookiekeys"`
-	AccessTokenTTL time.Duration `koanf:"accesstokenttl"`
-	IDTokenTTL     time.Duration `koanf:"idtokenttl"`
+	Issuer          string        `koanf:"issuer"`
+	CookieKeys      []string      `koanf:"cookiekeys"`
+	AccessTokenTTL  time.Duration `koanf:"accesstokenttl"`
+	IDTokenTTL      time.Duration `koanf:"idtokenttl"`
 	RefreshTokenTTL time.Duration `koanf:"refreshtokenttl"`
-	SessionTTL     time.Duration `koanf:"sessionttl"`
-	InteractionTTL time.Duration `koanf:"interactionttl"`
-	GrantTTL       time.Duration `koanf:"grantttl"`
-	ConsentTTL     time.Duration `koanf:"consentttl"`
+	SessionTTL      time.Duration `koanf:"sessionttl"`
+	InteractionTTL  time.Duration `koanf:"interactionttl"`
+	GrantTTL        time.Duration `koanf:"grantttl"`
+	ConsentTTL      time.Duration `koanf:"consentttl"`
 }
 
 type SecurityConfig struct {
-	CryptoKey            []byte `koanf:"cryptokey"`
-	PasswordMin          int    `koanf:"passwordmin"`
-	PasswordMinScore     int    `koanf:"passwordminscore"`
-	LoginMaxAttempts     int    `koanf:"loginmaxattempts"`
-	LoginBlockDuration   int    `koanf:"loginblockduration"`
-	TotpMaxAttempts      int    `koanf:"totpmaxattempts"`      // TOTP 最大尝试次数
-	AuditLogRetention    int    `koanf:"auditlogretention"`    // 审计日志保留天数
-	LoginAttemptCleanup  int    `koanf:"loginattemptcleanup"`  // 登录尝试记录清理间隔（小时）
-	AutoApproveUsers     bool   `koanf:"autoapproveusers"`     // 自动批准所有注册用户（用于测试环境）
+	CryptoKey           []byte `koanf:"cryptokey"`
+	PasswordMin         int    `koanf:"passwordmin"`
+	PasswordMinScore    int    `koanf:"passwordminscore"`
+	BcryptCost          int    `koanf:"bcryptcost"` // bcrypt 哈希成本（4-31），默认 12
+	LoginMaxAttempts    int    `koanf:"loginmaxattempts"`
+	LoginBlockDuration  int    `koanf:"loginblockduration"`
+	TotpMaxAttempts     int    `koanf:"totpmaxattempts"`     // TOTP 最大尝试次数
+	AuditLogRetention   int    `koanf:"auditlogretention"`   // 审计日志保留天数
+	LoginAttemptCleanup int    `koanf:"loginattemptcleanup"` // 登录尝试记录清理间隔（小时）
+	AutoApproveUsers    bool   `koanf:"autoapproveusers"`    // 自动批准所有注册用户（用于测试环境）
 }
 
 type UIConfig struct {
@@ -104,13 +106,36 @@ func Load(configPath string) (*Config, error) {
 
 	// Load environment variables with APP_ prefix
 	k.Load(env.Provider("APP_", ".", func(s string) string {
-		return strings.Replace(
-			strings.ToLower(strings.TrimPrefix(s, "APP_")),
-			"_", ".", -1,
-		)
+		// 支持两种环境变量风格：
+		//   APP_SERVER_PORT   -> server.port（推荐，单一 "_" 分隔）
+		//   APP_SERVER_PORT_X -> 兼容旧的 "APP_A_B" -> "a.b" 映射
+		name := strings.ToLower(strings.TrimPrefix(s, "APP_"))
+		// 常见配置键显式映射，避免 "SERVER_PORT" 被误解析为 "server.port.x"
+		known := map[string]string{
+			"server_port":               "server.port",
+			"server_host":               "server.host",
+			"server_environment":        "server.environment",
+			"server_appurl":             "server.appurl",
+			"server_basepath":           "server.basepath",
+			"server_timezone":           "server.timezone",
+			"server_ratelimit":          "server.ratelimit",
+			"server_cookieDomain":       "server.cookiedomain",
+			"database_path":             "database.path",
+			"security_cryptokey":        "security.cryptokey",
+			"security_bcryptcost":       "security.bcryptcost",
+			"security_autoapproveusers": "security.autoapproveusers",
+			"oidc_issuer":               "oidc.issuer",
+			"ui_appname":                "ui.appname",
+			"logging_level":             "logging.level",
+		}
+		if v, ok := known[name]; ok {
+			return v
+		}
+		return strings.Replace(name, "_", ".", -1)
 	}), nil)
 
 	// Build config with defaults
+	// 注意：defaults 直接写入 cfg，再由 k.Unmarshal 用已加载的 env/file 值覆盖
 	cfg := &Config{
 		Server: ServerConfig{
 			Port:             3000,
@@ -131,23 +156,24 @@ func Load(configPath string) (*Config, error) {
 			AccessTokenTTL:  15 * time.Minute,
 			IDTokenTTL:      30 * time.Minute,
 			RefreshTokenTTL: 7 * 24 * time.Hour,
-			SessionTTL:      90 * 24 * time.Hour,
+			SessionTTL:      30 * 24 * time.Hour, // OIDC 会话 30 天（从 90 天缩短，降低 token 泄露风险）
 			InteractionTTL:  10 * time.Minute,
 			GrantTTL:        30 * 24 * time.Hour,
 			ConsentTTL:      30 * 24 * time.Hour,
 		},
 		Session: SessionConfig{
-			TTL:         24 * time.Hour,       // 普通登录 24 小时
+			TTL:         24 * time.Hour,      // 普通登录 24 小时
 			TTLRemember: 30 * 24 * time.Hour, // "记住我" 30 天
 		},
 		Security: SecurityConfig{
 			PasswordMin:         8,
 			PasswordMinScore:    3,
+			BcryptCost:          12, // 默认 12，可通过 APP_SECURITY_BCRYPTCOST 配置
 			LoginMaxAttempts:    10,
 			LoginBlockDuration:  30,
 			TotpMaxAttempts:     5,
-			AuditLogRetention:   90,  // 默认保留 90 天
-			LoginAttemptCleanup: 24,  // 默认每 24 小时清理一次
+			AuditLogRetention:   90,    // 默认保留 90 天
+			LoginAttemptCleanup: 24,    // 默认每 24 小时清理一次
 			AutoApproveUsers:    false, // 默认不自动批准
 		},
 		UI: UIConfig{
@@ -163,6 +189,44 @@ func Load(configPath string) (*Config, error) {
 	// Unmarshal into config struct
 	if err := k.Unmarshal("", cfg); err != nil {
 		return nil, err
+	}
+
+	// 显式环境变量覆盖（koanf env.Provider 对部分键的映射可能与结构体 tag 不一致，
+	// 这里对关键配置做最终覆盖，确保 APP_* 环境变量优先于默认值）
+	if v := os.Getenv("APP_SERVER_PORT"); v != "" {
+		if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil {
+			cfg.Server.Port = n
+		}
+	}
+	if v := os.Getenv("APP_SERVER_HOST"); v != "" {
+		cfg.Server.Host = strings.TrimSpace(v)
+	}
+	if v := os.Getenv("APP_SERVER_ENVIRONMENT"); v != "" {
+		cfg.Server.Environment = strings.TrimSpace(v)
+	}
+	if v := os.Getenv("APP_SERVER_APPURL"); v != "" {
+		cfg.Server.AppURL = strings.TrimSpace(v)
+	}
+	if v := os.Getenv("APP_SERVER_BASEPATH"); v != "" {
+		cfg.Server.BasePath = strings.TrimSpace(v)
+	}
+	if v := os.Getenv("APP_SERVER_TIMEZONE"); v != "" {
+		cfg.Server.Timezone = strings.TrimSpace(v)
+	}
+	if v := os.Getenv("APP_DATABASE_PATH"); v != "" {
+		cfg.Database.Path = strings.TrimSpace(v)
+	}
+	if v := os.Getenv("APP_OIDC_ISSUER"); v != "" {
+		cfg.OIDC.Issuer = strings.TrimSpace(v)
+	}
+	if v := os.Getenv("APP_SECURITY_AUTOAPPROVEUSERS"); v != "" {
+		cfg.Security.AutoApproveUsers = strings.EqualFold(strings.TrimSpace(v), "true")
+	}
+	if v := os.Getenv("APP_UI_APPNAME"); v != "" {
+		cfg.UI.AppName = strings.TrimSpace(v)
+	}
+	if v := os.Getenv("APP_LOGGING_LEVEL"); v != "" {
+		cfg.Logging.Level = strings.TrimSpace(v)
 	}
 
 	// Set issuer to AppURL if not specified
@@ -318,6 +382,10 @@ func loadEnvFile(path string) {
 		if len(parts) == 2 {
 			key := strings.TrimSpace(parts[0])
 			value := strings.TrimSpace(parts[1])
+			// 真实环境变量优先于 .env 文件（不要覆盖已存在的进程环境变量）
+			if _, exists := os.LookupEnv(key); exists {
+				continue
+			}
 			// 移除引号
 			if len(value) >= 2 && (value[0] == '"' || value[0] == '\'') && value[0] == value[len(value)-1] {
 				value = value[1 : len(value)-1]

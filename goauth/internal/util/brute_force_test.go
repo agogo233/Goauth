@@ -46,7 +46,7 @@ func setupTestDB(t *testing.T) *sqlx.DB {
 
 func TestBruteForceProtector_RecordAttempt(t *testing.T) {
 	db := setupTestDB(t)
-	protector := NewBruteForceProtector(db, 5, 30)
+	protector := NewBruteForceProtector(db, 5, 30, 5)
 	ctx := context.Background()
 
 	tests := []struct {
@@ -72,7 +72,7 @@ func TestBruteForceProtector_RecordAttempt(t *testing.T) {
 
 func TestBruteForceProtector_IsBlocked(t *testing.T) {
 	db := setupTestDB(t)
-	protector := NewBruteForceProtector(db, 3, 30) // 3次失败后封锁
+	protector := NewBruteForceProtector(db, 3, 30, 3) // 3次失败后封锁
 	ctx := context.Background()
 
 	// 记录失败尝试（同一 IP）
@@ -117,7 +117,7 @@ func TestBruteForceProtector_IsBlocked(t *testing.T) {
 
 func TestBruteForceProtector_IsBlocked_ByIP(t *testing.T) {
 	db := setupTestDB(t)
-	protector := NewBruteForceProtector(db, 3, 30) // 3次失败后封锁 IP
+	protector := NewBruteForceProtector(db, 3, 30, 3) // 3次失败后封锁 IP
 	ctx := context.Background()
 
 	// 同一 IP 多次失败（不同用户名）
@@ -151,7 +151,7 @@ func TestBruteForceProtector_IsBlocked_ByIP(t *testing.T) {
 
 func TestBruteForceProtector_ClearAttempts(t *testing.T) {
 	db := setupTestDB(t)
-	protector := NewBruteForceProtector(db, 3, 30)
+	protector := NewBruteForceProtector(db, 3, 30, 3)
 	ctx := context.Background()
 
 	// 记录失败尝试
@@ -178,7 +178,7 @@ func TestBruteForceProtector_ClearAttempts(t *testing.T) {
 
 func TestBruteForceProtector_GetRemainingAttempts(t *testing.T) {
 	db := setupTestDB(t)
-	protector := NewBruteForceProtector(db, 5, 30)
+	protector := NewBruteForceProtector(db, 5, 30, 5)
 	ctx := context.Background()
 
 	// 初始应该有 5 次剩余
@@ -229,7 +229,7 @@ func TestBruteForceProtector_GetRemainingAttempts(t *testing.T) {
 
 func TestBruteForceProtector_CleanupOldAttempts(t *testing.T) {
 	db := setupTestDB(t)
-	protector := NewBruteForceProtector(db, 5, 30)
+	protector := NewBruteForceProtector(db, 5, 30, 5)
 	ctx := context.Background()
 
 	// 插入一条旧记录（手动插入以模拟过期）
@@ -275,7 +275,7 @@ func TestBruteForceProtector_CleanupOldAttempts(t *testing.T) {
 
 func TestBruteForceProtector_SuccessfulLoginClearsBlocking(t *testing.T) {
 	db := setupTestDB(t)
-	protector := NewBruteForceProtector(db, 3, 30)
+	protector := NewBruteForceProtector(db, 3, 30, 3)
 	ctx := context.Background()
 
 	// 记录 2 次失败（未达封锁阈值）

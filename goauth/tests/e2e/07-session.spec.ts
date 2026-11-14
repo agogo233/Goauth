@@ -248,10 +248,13 @@ test.describe('会话并发', () => {
       await page.waitForTimeout(2000);
     }
     
-    // 第一个会话登出 - 使用 evaluate 调用 API
+    // 第一个会话登出 - 使用 evaluate 调用 API（携带 CSRF token）
     await page1.evaluate(async () => {
       try {
-        await fetch('/api/auth/logout', { method: 'POST' });
+        const csrfToken = decodeURIComponent(
+          document.cookie.split(';').find((c: string) => c.trim().startsWith('csrf_token='))?.split('=')[1] || ''
+        );
+        await fetch('/api/auth/logout', { method: 'POST', headers: { 'X-CSRF-Token': csrfToken } });
       } catch {}
     });
     await page1.waitForTimeout(1000);

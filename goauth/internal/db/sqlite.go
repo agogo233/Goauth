@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"time"
@@ -20,22 +21,35 @@ type DB struct {
 }
 
 func New(cfg *config.DatabaseConfig) (*DB, error) {
+	return NewWithTimezone(cfg, "Asia/Shanghai")
+}
+
+// NewWithTimezone 创建数据库连接，时区从配置读取
+// loc 参数用于 SQLite 驱动解析 TEXT 时间列的时区
+func NewWithTimezone(cfg *config.DatabaseConfig, timezone string) (*DB, error) {
 	// Ensure directory exists
 	dir := filepath.Dir(cfg.Path)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create database directory: %w", err)
 	}
 
+	if timezone == "" {
+		timezone = "Asia/Shanghai"
+	}
+
 	// Open database with WAL mode for better concurrency
-	// _loc=Asia/Shanghai: Parse time columns using Shanghai timezone
-	dsn := fmt.Sprintf("%s?_journal_mode=WAL&_busy_timeout=5000&_foreign_keys=on&_loc=Asia%%2fShanghai", cfg.Path)
+	// _loc=<timezone>: 按 app 配置的时区解析时间列
+	dsn := fmt.Sprintf("%s?_journal_mode=WAL&_busy_timeout=5000&_foreign_keys=on&_loc=%s",
+		cfg.Path, url.PathEscape(timezone))
 	db, err := sqlx.Open("sqlite3", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
 
 	// Set connection pool settings
-	db.SetMaxOpenConns(5)
+	// SQLite 写操作串行化，单连接可避免 "database is locked"，
+	// 读请求通过 WAL 模式由同连接并发服务
+	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
 	db.SetConnMaxLifetime(5 * time.Minute)
 
@@ -44,7 +58,7 @@ func New(cfg *config.DatabaseConfig) (*DB, error) {
 		return nil, fmt.Errorf("failed to ping database: %w", err)
 	}
 
-	log.Info().Str("path", cfg.Path).Msg("Database connected")
+	log.Info().Str("path", cfg.Path).Str("timezone", timezone).Msg("Database connected")
 
 	return &DB{db}, nil
 }
@@ -75,6 +89,23 @@ func (db *DB) Transaction(ctx context.Context, fn func(tx *sql.Tx) error) error 
 }
 
 func (db *DB) RunMigrations() error {
+	return RunMigrations(db.DB)
+}
+
+// RunMigrations 执行数据库迁移（可被测试调用）
+// 使用 schema_migrations 表记录已应用的迁移版本；幂等，可重复执行
+// 当前迁移集为全量 CREATE IF NOT EXISTS / ALTER，天然幂等，
+// 版本号用于未来引入破坏性迁移时按序执行和回滚判断
+func RunMigrations(db *sqlx.DB) error {
+	// 版本化迁移表（若已存在则跳过）
+	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
+		version INTEGER PRIMARY KEY,
+		name TEXT NOT NULL,
+		appliedAt TEXT NOT NULL
+	)`); err != nil {
+		return fmt.Errorf("create schema_migrations failed: %w", err)
+	}
+
 	migrations := []string{
 		// Users table
 		`CREATE TABLE IF NOT EXISTS users (
@@ -293,6 +324,10 @@ func (db *DB) RunMigrations() error {
 		`CREATE INDEX IF NOT EXISTS idx_consent_expiresAt ON consent(expiresAt)`,
 		`CREATE INDEX IF NOT EXISTS idx_user_groups_groupId ON user_groups(groupId)`,
 		`CREATE INDEX IF NOT EXISTS idx_proxy_auth_groups_groupId ON proxy_auth_groups(groupId)`,
+		// 补充缺失的功能索引
+		`CREATE INDEX IF NOT EXISTS idx_invitations_challenge ON invitations(challenge)`,
+		`CREATE INDEX IF NOT EXISTS idx_audit_log_actorId ON audit_log(actorId)`,
+		`CREATE INDEX IF NOT EXISTS idx_keys_type_expiresAt ON keys(type, expiresAt)`,
 	}
 
 	for i, migration := range migrations {
@@ -312,6 +347,15 @@ func (db *DB) RunMigrations() error {
 				return fmt.Errorf("alter table failed: %w", err)
 			}
 		}
+	}
+
+	// 记录当前迁移版本（单版本批量迁移模式）
+	if _, err := db.Exec(`
+		INSERT INTO schema_migrations (version, name, appliedAt)
+		VALUES (1, 'baseline', ?)
+		ON CONFLICT(version) DO NOTHING
+	`, time.Now().Format(time.RFC3339)); err != nil {
+		return fmt.Errorf("record migration version failed: %w", err)
 	}
 
 	log.Info().Int("count", len(migrations)).Msg("Database migrations completed")

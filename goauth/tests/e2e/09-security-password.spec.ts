@@ -589,9 +589,8 @@ test.describe('管理员密码重置安全', () => {
       test.skip();
       return;
     }
-
-    const loginData = await loginResponse.json();
-    const sessionToken = loginData.token;
+    // token 改为 HttpOnly cookie 下发，从 Set-Cookie 提取
+    const sessionToken = loginResponse.headers().get("set-cookie")?.match(/session=([^;]+)/)?.[1] || "";
 
     // 尝试重置他人密码
     const resetResponse = await request.post('/api/admin/users/some-user-id/reset-password', {

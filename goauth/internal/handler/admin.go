@@ -170,6 +170,10 @@ func (h *AdminHandler) ResetUserPassword(c *gin.Context) {
 		return
 	}
 
+	actorID, _ := c.Get("userID")
+	actorIDStr, _ := actorID.(string)
+	_ = h.auditService.Log(c.Request.Context(), model.AuditActionPasswordReset, &actorIDStr, &userID, nil, c.ClientIP())
+
 	c.JSON(http.StatusOK, gin.H{"message": "密码已重置"})
 }
 

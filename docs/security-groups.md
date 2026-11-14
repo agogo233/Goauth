@@ -3,10 +3,10 @@
 安全组在管理员安全组页面创建，用户可以从安全组更新或用户更新页面添加到安全组。
 
 > [!IMPORTANT]
-> 属于 `auth_admins` 组的 Goauth 用户将成为管理员。这是在使用初始管理员账户创建/邀请自己后提升权限的方式。
+> Goauth 的管理员由用户账户上的 `isAdmin` 标识决定：首个注册的用户自动成为管理员，也可以通过 CLI `goauth create-admin` 创建或由管理员在用户页面设置。管理员身份与安全组无关。
 
 > [!TIP]
-> 拥有 `auth_admins` 组的用户不会被拒绝访问任何资源，无论其他安全组限制如何。
+> 如需限制某个 OIDC 应用或 ProxyAuth 域名的访问，请为其分配对应的安全组；未分配任何安全组的应用/域名对所有已登录用户开放。
 
 <p align=center>
 <img width="336" alt="安全组页面" src="/public/screenshots/groups.png" />
@@ -16,8 +16,7 @@
 
 ### ProxyAuth
 安全组在 ProxyAuth 域名中用于：
-* ProxyAuth 域名授权
-* 可信头 SSO，用户的组会添加到 'Remote-Groups' 头中
+* ProxyAuth 域名授权，限制哪些安全组的用户可以访问该域名
 
 有关 ProxyAuth 设置的信息，请访问 [代理认证设置](proxy-auth.md)。
 

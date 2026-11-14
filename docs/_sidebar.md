@@ -9,4 +9,7 @@
   * [安全组](security-groups.md)
   * [密码重置](password-reset.md)
   * [CLI 命令](cli.md)
+  * [备份与恢复](backup-restore.md)
   * [故障排除](troubleshooting.md)
+- 开发者指南
+  * [E2E 测试设计](e2e-test-design.md)

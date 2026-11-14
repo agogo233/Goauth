@@ -62,7 +62,7 @@ services:
       # Middleware for proxy auth (optional, for protecting other services)
       - "traefik.http.middlewares.goauth-auth.forwardauth.address=http://goauth:3000/authz/forward-auth"
       - "traefik.http.middlewares.goauth-auth.forwardauth.trustForwardHeader=true"
-      - "traefik.http.middlewares.goauth-auth.forwardauth.authResponseHeaders=X-Forwarded-User,X-Forwarded-Email,X-Forwarded-Groups"
+      - "traefik.http.middlewares.goauth-auth.forwardauth.authResponseHeaders=X-User-Id,X-User-Name,X-User-Email"
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/health"]

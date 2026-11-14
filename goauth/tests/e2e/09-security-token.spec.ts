@@ -239,9 +239,12 @@ test.describe('Token 注销与重放防护', () => {
 
     const oldSession = sessionCookie.value;
 
-    // 登出
+    // 登出（携带 CSRF token）
     await page.evaluate(async () => {
-      await fetch('/api/auth/logout', { method: 'POST' });
+      const csrfToken = decodeURIComponent(
+        document.cookie.split(';').find((c: string) => c.trim().startsWith('csrf_token='))?.split('=')[1] || ''
+      );
+      await fetch('/api/auth/logout', { method: 'POST', headers: { 'X-CSRF-Token': csrfToken } });
     });
 
     await page.waitForTimeout(1000);
@@ -494,9 +497,12 @@ test.describe('并发会话管理', () => {
         await page.waitForTimeout(2000);
       }
 
-      // 第一个会话登出
+      // 第一个会话登出（携带 CSRF token）
       await page1.evaluate(async () => {
-        await fetch('/api/auth/logout', { method: 'POST' });
+        const csrfToken = decodeURIComponent(
+          document.cookie.split(';').find((c: string) => c.trim().startsWith('csrf_token='))?.split('=')[1] || ''
+        );
+        await fetch('/api/auth/logout', { method: 'POST', headers: { 'X-CSRF-Token': csrfToken } });
       });
 
       await page1.waitForTimeout(1000);

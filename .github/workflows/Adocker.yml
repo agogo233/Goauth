@@ -63,9 +63,3 @@ jobs:
           package-type: 'container'
           min-versions-to-keep: 2
           delete-only-untagged-versions: 'true'
-
-      - name: 删除旧package
-        uses: actions/delete-package-versions@v5
-        with: 
-          package-name: 'voidauth'
-          package-type: 'container'

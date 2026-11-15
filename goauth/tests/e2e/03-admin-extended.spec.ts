@@ -278,7 +278,7 @@ test.describe('用户删除', () => {
     }
 
     // token 改为 HttpOnly cookie 下发，从 Set-Cookie 提取
-    const newAdminSession = loginResponse.headers().get("set-cookie")?.match(/session=([^;]+)/)?.[1] || "";
+    const newAdminSession = loginResponse.headers()["set-cookie"]?.match(/session=([^;]+)/)?.[1] || "";
 
     // 使用新管理员的 session 尝试删除自己
     const deleteResponse = await request.delete(`/api/admin/users/${newUser.id}`, {
@@ -740,8 +740,8 @@ test.describe('邀请完整流程', () => {
     }
 
     const invitation = await createResponse.json();
-    // 邀请使用 challenge 字段
-    const token = invitation.challenge || invitation.token;
+    // Challenge 字段不通过 API 暴露（json:"-"），邀请链接使用 invitation.id
+    const token = invitation.id;
 
     // 使用新页面访问邀请链接
     const context = page.context();

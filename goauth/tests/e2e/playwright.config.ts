@@ -84,12 +84,18 @@ export default defineConfig({
   // 自动启动服务器
   webServer: {
     // 在启动服务器前先清理数据库，确保干净的测试环境
-    // 使用绝对路径确保清理正确的目录
-    command: 'bash -c "cd /home/git/working/Goauth/goauth && rm -rf data/goauth.db* && APP_SECURITY_LOGINMAXATTEMPTS=1000 APP_SERVER_RATELIMIT=0 APP_SECURITY_AUTOAPPROVEUSERS=true ./bin/goauth serve"',
+    // 使用项目根目录的相对路径，保证在任何环境下都能正确清理
+    // 启动后立即用 CLI 创建固定管理员 e2e_admin，供各测试文件复用
+    //（否则第一个注册的用户会成为管理员，破坏"普通用户权限"等测试的前提）
+    // 注意：测试环境使用 APP_SECURITY_AUTOAPPROVEUSERS=true 自动批准用户
+    command: 'bash ./start-server.sh',
     port: 3000,
-    timeout: 30000,
+    timeout: 60000,
     reuseExistingServer: false,
     stdout: 'ignore',
     stderr: 'pipe',
+    env: {
+      APP_SECURITY_AUTOAPPROVEUSERS: 'true',
+    },
   },
 });

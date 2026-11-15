@@ -359,10 +359,10 @@ test.describe('越权访问防御 (IDOR)', () => {
     
     if (login1.status() === 200 && login2.status() === 200) {
       // token 改为 HttpOnly cookie 下发，从 Set-Cookie 提取
-      testData.user1Session = login1.headers().get("set-cookie")?.match(/session=([^;]+)/)?.[1] || "";
+      testData.user1Session = login1.headers()["set-cookie"]?.match(/session=([^;]+)/)?.[1] || "";
       testData.user1Id = user1Record?.id;
       testData.user1Username = user1Username;
-      testData.user2Session = login2.headers().get("set-cookie")?.match(/session=([^;]+)/)?.[1] || "";
+      testData.user2Session = login2.headers()["set-cookie"]?.match(/session=([^;]+)/)?.[1] || "";
       testData.user2Id = user2Record?.id;
       testData.user2Username = user2Username;
     }

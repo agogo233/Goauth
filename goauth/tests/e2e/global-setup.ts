@@ -12,7 +12,8 @@ import { unlinkSync, existsSync, rmSync } from 'fs';
  */
 async function globalSetup() {
   const stateFile = '/tmp/goauth-e2e-admin-state.json';
-  const dbPath = '/home/git/working/Goauth/goauth/data';
+  // 数据库目录基于项目根目录（global-setup 位于 tests/e2e/ 下）
+  const dbPath = `${__dirname}/../../data`;
   
   console.log('🔧 全局设置: 清理测试状态...');
   

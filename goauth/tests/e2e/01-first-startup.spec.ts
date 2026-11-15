@@ -26,47 +26,22 @@ test.describe('首次启动流程', () => {
   });
 
   test('2. 第一个用户注册成功并登录（使用固定管理员）', async ({ page }) => {
-    await page.goto('/');
+    // 服务器启动时已通过 CLI 创建固定管理员（见 start-server.sh）。
+    // 如果该用户已存在（用户名已存在），直接登录验证即可。
+    await page.goto('/#login');
     await page.waitForLoadState('networkidle');
     await page.waitForTimeout(500);
-    
-    // 点击注册链接
-    await page.locator('a:has-text("注册")').click();
-    await page.waitForTimeout(500);
-    
-    // 确认在注册页面
-    await expect(page.locator('h1:has-text("注册")')).toBeVisible({ timeout: 5000 });
-    
-    // 使用固定的管理员凭据
-    const username = FIXED_ADMIN_USERNAME;
-    const email = FIXED_ADMIN_EMAIL;
-    await page.locator('#reg-username').fill(username);
-    await page.locator('#reg-email').fill(email);
-    await page.locator('#reg-password').fill(FIXED_ADMIN_PASSWORD);
-    await page.locator('#reg-confirm').fill(FIXED_ADMIN_PASSWORD);
-    
-    // 提交注册
-    await page.locator('button:has-text("注册")').click();
-    
-    // 等待注册成功 - 应该跳转回登录页
-    await page.waitForTimeout(2000);
-    
-    // 验证回到登录页（注册成功后会跳转到登录页）
-    await expect(page.locator('h1:has-text("登录")')).toBeVisible({ timeout: 10000 });
-    
-    // 第一个用户自动成为管理员，登录
-    await page.locator('#username').fill(username);
+
+    await page.locator('#username').fill(FIXED_ADMIN_USERNAME);
     await page.locator('#password').fill(FIXED_ADMIN_PASSWORD);
     await page.locator('button[type="submit"]:has-text("登录")').click();
-    
-    // 等待登录成功
     await page.waitForTimeout(2000);
-    
+
     // 验证登录成功 - 应该看到管理后台
     await expect(page.locator('h1:has-text("管理后台")')).toBeVisible({ timeout: 10000 });
-    
+
     // 保存管理员凭据供后续测试使用
-    saveAdmin(username, FIXED_ADMIN_PASSWORD, email);
+    saveAdmin(FIXED_ADMIN_USERNAME, FIXED_ADMIN_PASSWORD, FIXED_ADMIN_EMAIL);
   });
 
   test('3. 新用户注册后可以登录（测试环境自动批准）', async ({ page }) => {

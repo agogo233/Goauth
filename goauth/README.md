@@ -224,6 +224,42 @@ goauth/
 └── Makefile
 ```
 
+## 测试
+
+本项目包含三层测试，覆盖单元、集成到端到端（E2E）：
+
+| 层级 | 命令 | 说明 |
+|------|------|------|
+| 单元测试 | `make test` | Go 单元测试，覆盖 `internal/` 各包 |
+| 集成测试 | `make test-integration` | 集成测试，覆盖 `tests/integration/`（真实 SQLite + HTTP 全链路） |
+| E2E 测试 | `make test-e2e` | Playwright + Chromium，覆盖首次启动、认证、TOTP、管理后台、OIDC、邀请、ProxyAuth、会话、安全专项等 30 个 spec 文件 |
+
+> `make test-all` 运行单元 + 集成测试。E2E 因需要浏览器和串行数据库状态，单独用 `make test-e2e` 运行。
+
+### E2E 测试运行前提
+
+E2E 依赖以下环境，首次运行时需先准备：
+
+```bash
+# 1. 确保 Go 工具链已安装（>= 1.26）
+# 2. 编译服务器二进制（start-server.sh 依赖 bin/goauth）
+make build
+
+# 3. 安装 Playwright 依赖
+cd tests/e2e && npm install
+
+# 4. 下载 Chromium 浏览器
+cd tests/e2e && npx playwright install chromium
+
+# 5. 运行 E2E（自动清理数据库、启动服务器、创建固定管理员 e2e_admin）
+make test-e2e
+```
+
+要点：
+- E2E 通过 `tests/e2e/start-server.sh` 自动清理数据库、以测试配置（`APP_SECURITY_AUTOAPPROVEUSERS=true` 等）启动服务器，并创建固定管理员 `e2e_admin`，供各测试文件复用。
+- 端口默认 `3000`，可用 `GOAUTH_BASE_URL` 覆盖；`APP_OIDC_ISSUER` 缺省为 `http://localhost:3000`。
+- E2E 为单 worker 串行执行（数据库有状态），全量约 20-30 分钟。
+
 ## 安全特性
 
 - **密码哈希** - bcrypt (默认 cost=12，可通过 `APP_SECURITY_BCRYPTCOST` 配置)

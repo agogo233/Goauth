@@ -1,4 +1,4 @@
-.PHONY: all build run test test-integration test-e2e test-e2e-headed test-all lint fmt clean docker docker-run deps help
+.PHONY: all build run test test-integration test-e2e test-e2e-headed test-all test-full lint fmt clean docker docker-run deps help
 
 # Variables
 BINARY_NAME=goauth
@@ -41,6 +41,10 @@ test-e2e-headed:
 
 # Run all tests
 test-all: test test-integration
+
+# Run the full test suite (unit + integration + E2E)
+# E2E 需要浏览器与串行数据库状态，耗时较长，建议 CI 中单独运行
+test-full: test test-integration test-e2e
 
 # Run linter
 lint:

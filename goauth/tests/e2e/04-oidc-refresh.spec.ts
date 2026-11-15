@@ -10,6 +10,13 @@ import { writeFileSync, readFileSync, existsSync, unlinkSync } from 'fs';
  * 3. 刷新令牌过期处理
  * 4. 撤销刷新令牌
  * 5. 访问令牌过期后自动刷新
+ *
+ * 注意：本文件多处使用 `test.skip()` 作为“前置条件不满足时的安全跳过”，
+ * 并非失败。典型跳过场景包括：
+ * - 未能从登录响应提取到 session cookie（依赖固定管理员 e2e_admin 已登录）
+ * - 授权流程未返回 `authRequestID` / 最终未重定向到含 `code` 的地址
+ * - 前置测试未成功产出可复用的刷新令牌（如未获取到初始令牌）
+ * 因此本文件实际通过数可能少于用例总数（部分用例因前置数据不满足而跳过）。
  */
 
 test.describe.configure({ mode: 'serial' });

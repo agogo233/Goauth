@@ -547,49 +547,49 @@ logging:
 ## 实现顺序
 
 1. **Phase 1: 核心框架**
-   - [ ] go.mod 配置
-   - [ ] main.go 入口
-   - [ ] config 配置加载
-   - [ ] db SQLite连接
-   - [ ] model 数据模型
+   - [x] go.mod 配置
+   - [x] main.go 入口
+   - [x] config 配置加载
+   - [x] db SQLite连接
+   - [x] model 数据模型
 
 2. **Phase 2: OIDC核心**
-   - [ ] oidc/provider.go
-   - [ ] oidc/storage.go
-   - [ ] handler/oidc.go
+   - [x] oidc/provider.go
+   - [x] oidc/storage.go
+   - [x] handler/oidc.go
 
 3. **Phase 3: 认证系统**
-   - [ ] service/auth.go
-   - [ ] service/password.go
-   - [ ] handler/auth.go
-   - [ ] middleware/auth.go
+   - [x] service/auth.go
+   - [x] service/password.go
+   - [x] handler/auth.go
+   - [x] middleware/auth.go
 
 4. **Phase 4: TOTP**
-   - [ ] service/totp.go
-   - [ ] handler/totp相关
+   - [x] service/totp.go
+   - [x] handler/totp相关
 
 5. **Phase 5: 用户管理**
-   - [ ] repo/user.go
-   - [ ] service/user.go
-   - [ ] handler/user.go
+   - [x] repo/user.go
+   - [x] service/user.go
+   - [x] handler/user.go
 
 6. **Phase 6: 管理后台**
-   - [ ] repo/group.go
-   - [ ] repo/invitation.go
-   - [ ] repo/proxy_auth.go
-   - [ ] handler/admin.go
+   - [x] repo/group.go
+   - [x] repo/invitation.go
+   - [x] repo/proxy_auth.go
+   - [x] handler/admin.go
 
 7. **Phase 7: 前端**
-   - [ ] web/index.html（含CDN降级逻辑）
-   - [ ] web/css/style.css
-   - [ ] web/js/app.js（含URL路由同步）
-   - [ ] web/js/alpine.min.js（本地备份）
+   - [x] web/index.html（含CDN降级逻辑）
+   - [x] web/css/style.css
+   - [x] web/js/app.js（含URL路由同步）
+   - [x] web/js/alpine.min.js（本地备份）
 
 8. **Phase 8: 部署配置**
-   - [ ] Dockerfile
-   - [ ] docker-compose.yml
-   - [ ] Makefile
-   - [ ] README.md
+   - [x] Dockerfile
+   - [x] docker-compose.yml
+   - [x] Makefile
+   - [x] README.md
 
 ## 安全设计
 
